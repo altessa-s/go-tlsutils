@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/altessa-s/go-atlas-core/runtime/singleflight"
+
 	coreerrs "github.com/altessa-s/go-atlas-core/errors"
 	tlsutils "github.com/altessa-s/go-tlsutils"
 )
@@ -68,6 +70,7 @@ var _ tlsutils.OCSPStapler = (*Stapler)(nil)
 type Stapler struct {
 	mu             sync.RWMutex
 	cache          map[string]*ocspCacheEntry
+	fetches        *singleflight.Group[string, []byte] // shares a cache-miss fetch per certificate
 	httpClient     *http.Client
 	retryPolicy    RetryPolicy
 	logger         *slog.Logger
@@ -127,6 +130,7 @@ func NewOCSPStapler(opts ...Option) *Stapler {
 
 	s := &Stapler{
 		cache:             make(map[string]*ocspCacheEntry),
+		fetches:           singleflight.New[string, []byte](),
 		httpClient:        httpClient,
 		retryPolicy:       o.retryPolicy,
 		logger:            logger,
@@ -172,35 +176,52 @@ func (s *Stapler) GetOCSPStaple(ctx context.Context, cert *tls.Certificate) ([]b
 	}
 
 	key := cacheKey(cert)
+	if response, ok := s.cachedResponse(key); ok {
+		return response, nil
+	}
 
+	// Concurrent handshakes missing the cache for the same certificate share
+	// one fetch. The shared fetch drops the first caller's cancellation, so
+	// its deadline (the handshake timeout) is carried over explicitly; every
+	// caller still stops waiting on its own context.
+	deadline, hasDeadline := ctx.Deadline()
+	return s.fetches.Do(ctx, key, func(ctx context.Context) ([]byte, error) {
+		if hasDeadline {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithDeadline(ctx, deadline)
+			defer cancel()
+		}
+		// A fetch that finished between the cache check and joining stored
+		// its result already.
+		if response, ok := s.cachedResponse(key); ok {
+			return response, nil
+		}
+		response, nextUpdate, err := s.fetchOCSPResponse(ctx, cert, leafCert)
+		if err != nil {
+			return nil, err
+		}
+		s.store(key, &ocspCacheEntry{response: response, nextUpdate: nextUpdate, cert: cert})
+		return response, nil
+	})
+}
+
+// cachedResponse returns the cached response for key while it is valid. The
+// entry is snapshotted under its read lock, which is released at once so no
+// lock is held across a network fetch.
+func (s *Stapler) cachedResponse(key string) ([]byte, bool) {
 	s.mu.RLock()
 	entry, exists := s.cache[key]
 	s.mu.RUnlock()
-
-	if exists {
-		// Snapshot the entry under a read lock, then release it immediately so
-		// the read lock is not held across the network fetch below (which would
-		// serialize RunRefreshCycle behind handshake traffic).
-		entry.mu.RLock()
-		valid := time.Now().Before(entry.nextUpdate)
-		response := entry.response
-		entry.mu.RUnlock()
-
-		// Return cached response if still valid
-		if valid {
-			return response, nil
-		}
+	if !exists {
+		return nil, false
 	}
 
-	// Fetch new OCSP response
-	response, nextUpdate, err := s.fetchOCSPResponse(ctx, cert, leafCert)
-	if err != nil {
-		return nil, err
+	entry.mu.RLock()
+	defer entry.mu.RUnlock()
+	if !time.Now().Before(entry.nextUpdate) {
+		return nil, false
 	}
-
-	s.store(key, &ocspCacheEntry{response: response, nextUpdate: nextUpdate, cert: cert})
-
-	return response, nil
+	return entry.response, true
 }
 
 // NeedsRefresh returns true if the certificate's OCSP response needs refreshing.

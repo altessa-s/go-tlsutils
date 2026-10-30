@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -208,6 +209,46 @@ type countingTransport struct {
 func (c *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	c.n.Add(1)
 	return http.DefaultTransport.RoundTrip(r)
+}
+
+// gatedTransport holds every request until release is closed and reports the
+// first one on entered.
+type gatedTransport struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *gatedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	g.once.Do(func() { close(g.entered) })
+	<-g.release
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+func TestGetOCSPStaple_SharesConcurrentFetch(t *testing.T) {
+	t.Parallel()
+	ca := testhelpers.NewCA(t)
+	r := newCountingResponder(t, ca, 3*time.Hour)
+	cert := chainWith(t, ca, r.srv.URL)
+	gate := &gatedTransport{entered: make(chan struct{}), release: make(chan struct{})}
+	s := NewOCSPStapler(WithHTTPClient(&http.Client{Transport: gate}))
+
+	const callers = 16
+	var wg sync.WaitGroup
+	staples := make([][]byte, callers)
+	errs := make([]error, callers)
+	for i := range callers {
+		wg.Go(func() { staples[i], errs[i] = s.GetOCSPStaple(t.Context(), cert) })
+	}
+	<-gate.entered
+	close(gate.release)
+	wg.Wait()
+
+	for i := range callers {
+		require.NoError(t, errs[i])
+		require.Equal(t, staples[0], staples[i])
+	}
+	require.Equal(t, int32(1), r.hits.Load(), "concurrent cache misses share one fetch")
 }
 
 func TestFetch_RetryAndFallbackServers(t *testing.T) {
