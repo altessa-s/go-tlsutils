@@ -13,8 +13,9 @@ import (
 	"net/url"
 	"time"
 
-	coreerrs "github.com/altessa-s/go-atlas-core/errors"
 	"github.com/altessa-s/go-atlas-net/urlx"
+
+	coreerrs "github.com/altessa-s/go-atlas-core/errors"
 	tlsutils "github.com/altessa-s/go-tlsutils"
 	vaultApi "github.com/hashicorp/vault/api"
 )
