@@ -70,6 +70,8 @@ type Providers struct {
 	providers map[ProviderType]Provider
 	// replaced holds providers displaced by Register; Close still closes
 	// them so their watchers and pollers do not outlive the collection.
+	// Invariant: no provider appears twice in replaced or in both replaced
+	// and providers, so Close closes each provider once.
 	replaced []Provider
 }
 
@@ -91,14 +93,17 @@ func (p *Providers) Register(provider Provider) {
 	if old, ok := p.providers[provider.Type()]; ok && !sameProvider(old, provider) {
 		p.replaced = append(p.replaced, old)
 	}
+	// A provider registered again is active, not displaced.
+	p.replaced = slices.DeleteFunc(p.replaced, func(r Provider) bool { return sameProvider(r, provider) })
 	p.providers[provider.Type()] = provider
 }
 
-// sameProvider reports whether a and b are the same provider value. Values of
-// a non-comparable type are never the same, which avoids a panic on ==.
+// sameProvider reports whether a and b are the same provider value. Values
+// that cannot be compared (a non-comparable type, or an interface field
+// holding a slice or map) are never the same, which avoids a panic on ==.
 func sameProvider(a, b Provider) bool {
-	t := reflect.TypeOf(a)
-	return t == reflect.TypeOf(b) && t.Comparable() && a == b
+	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
+	return va.Type() == vb.Type() && va.Comparable() && vb.Comparable() && a == b
 }
 
 // Get returns a provider by type.

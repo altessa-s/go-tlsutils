@@ -50,7 +50,32 @@ func TestProviders_Close_ClosesReplaced(t *testing.T) {
 	require.NotPanics(t, func() {
 		p.Register(valueProvider{})
 		p.Register(valueProvider{})
+		p.Register(anyFieldProvider{v: []string{"x"}})
+		p.Register(anyFieldProvider{v: []string{"x"}})
 	})
+}
+
+// anyFieldProvider has a comparable type whose values may not be: comparing
+// two of them holding slices panics.
+type anyFieldProvider struct {
+	v any
+}
+
+func (anyFieldProvider) Type() ProviderType              { return ProviderTypeVault }
+func (anyFieldProvider) TLSConfig() (*tls.Config, error) { return &tls.Config{}, nil } //nolint:gosec
+func (anyFieldProvider) Close(_ context.Context) error   { return nil }
+
+func TestProviders_Close_ReRegisteredClosesOnce(t *testing.T) {
+	p := &Providers{}
+	a := &mockProvider{typ: ProviderTypeFile}
+	b := &mockProvider{typ: ProviderTypeFile}
+	p.Register(a)
+	p.Register(b)
+	p.Register(a) // a becomes active again; b is displaced
+
+	p.Close(t.Context(), nil)
+	require.Equal(t, 1, a.closed, "a re-registered provider is closed once")
+	require.Equal(t, 1, b.closed, "the displaced provider is closed once")
 }
 
 func TestProviderType_String(t *testing.T) {
