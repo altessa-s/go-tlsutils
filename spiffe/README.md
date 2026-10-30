@@ -5,9 +5,7 @@ import "github.com/altessa-s/go-tlsutils/spiffe"
 ```
 
 Sources rotating mutual-TLS configurations from the SPIFFE Workload API. It is the producer half of mTLS — it keeps the service's own X.509-SVID and
-trust bundle fresh — and the counterpart to the verifier-side
-[auth/spiffe](https://github.com/altessa-s/go-atlas/tree/develop/auth/spiffe) and
-[auth/mtls](https://github.com/altessa-s/go-atlas/tree/develop/auth/mtls), which turn a peer's verified certificate into a principal.
+trust bundle fresh — and the counterpart to verifier-side code that turns a peer's verified certificate into a principal.
 
 ## Options
 
@@ -52,16 +50,8 @@ grpcServer := grpc.NewServer(grpc.Creds(provider.ServerCredentials()))
 conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(provider.ClientCredentials()))
 ```
 
-Derive the authorizer from configuration with the go-atlas factory
-[`security/tlsutils/spiffe/factory`](https://github.com/altessa-s/go-atlas/tree/develop/security/tlsutils/spiffe/factory):
-
-```go
-provider, err := factory.New(&cfg.SPIFFE).Provider(ctx)
-```
-
 ## Scope
 
-Obtaining and rotating the SVID is all this package does. It deliberately does not parse principals out of certificates
-([auth/spiffe](https://github.com/altessa-s/go-atlas/tree/develop/auth/spiffe)) or make authorization decisions
-([auth/mtls](https://github.com/altessa-s/go-atlas/tree/develop/auth/mtls)). A peer authorizer is mandatory — the provider
+Obtaining and rotating the SVID is all this package does. It deliberately does not parse principals out of certificates or make authorization
+decisions. A peer authorizer is mandatory — the provider
 is fail-closed and will not trust every SPIFFE ID.

@@ -14,10 +14,9 @@ import "github.com/altessa-s/go-tlsutils"
 TLS certificate loading, OCSP stapling, certificate providers and SPIFFE Workload API helpers for Go services and libraries. Sources include files, S3,
 Vault PKI and Let's Encrypt. Keys are PKCS#8, PKCS#1 or SEC1. Server and client defaults are TLS 1.2+.
 
-The module never depends on go-atlas. Packages read no configuration schema and report no metrics: callers configure them through options. Configuration
-factories stay in go-atlas: `security/tlsutils/factory`, `security/tlsutils/providers/s3/factory`, `security/tlsutils/providers/vault/factory` and
-`security/tlsutils/spiffe/factory`. OCSP refresh scheduling is the caller's job. Register `ocsp.Stapler.RefreshAllFunc` and call `MarkSchedulerManaged`
-only after the scheduler accepts the task.
+Packages read no configuration schema and report no metrics: callers configure them through options, and mapping configuration onto those options is
+left to the caller. OCSP refresh scheduling is the caller's job too. Register `ocsp.Stapler.RefreshAllFunc` and call `MarkSchedulerManaged` only after
+the scheduler accepts the task.
 
 ## Requirements
 
@@ -60,7 +59,7 @@ Go 1.27 or later (`go 1.27.0` in `go.mod`).
   `youmark/pkcs8` (encrypted PKCS#8 keys), `golang.org/x/crypto/ocsp`, `golang.org/x/crypto/acme` and `acme/autocert` (Let's Encrypt),
   `fsnotify` (file provider), `aws-sdk-go-v2` (S3 provider), `hashicorp/vault/api` and `johanbrandhorst/certify` (Vault PKI),
   `spiffe/go-spiffe/v2` and `google.golang.org/grpc` (SPIFFE Workload API).
-- **No metrics, health or config schemas.** Factories that map go-atlas configuration onto these packages stay in go-atlas.
+- **No metrics, health or config schemas.** Packages are configured through options; configuration mapping and telemetry belong to the caller.
 - **SDKs stay inside the provider that needs them.** The root package, `ocsp` and `providers` do not import AWS, Vault, ACME or SPIFFE.
 - **Safe by default** — `DefaultTLSConfig` is TLS 1.2+; the OCSP failure mode defaults to soft and hard mode is opt-in.
 - **Thread-safe by default** — exported functions and types are safe for concurrent use unless documented otherwise.

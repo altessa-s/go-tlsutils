@@ -23,8 +23,7 @@ type options struct {
 // during the handshake. It is mandatory — [New] fails with [ErrNoAuthorizer]
 // when none is supplied. Build one with the helpers in
 // [github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig] (AuthorizeMemberOf,
-// AuthorizeOneOf, AuthorizeID, AdaptMatcher), or derive it from configuration
-// in the go-atlas factory security/tlsutils/spiffe/factory. A nil authorizer is ignored.
+// AuthorizeOneOf, AuthorizeID, AdaptMatcher). A nil authorizer is ignored.
 func WithAuthorizer(a tlsconfig.Authorizer) Option {
 	return func(o *options) {
 		if a == nil {

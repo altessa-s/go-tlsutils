@@ -24,8 +24,7 @@
 //
 // A peer authorizer is mandatory: without one the provider fails closed with
 // [ErrNoAuthorizer] rather than trusting any SPIFFE ID. Build one with the
-// helpers in the go-spiffe tlsconfig package, or derive it from configuration
-// in the go-atlas factory `security/tlsutils/spiffe/factory`.
+// helpers in the go-spiffe tlsconfig package.
 //
 // # Usage
 //
