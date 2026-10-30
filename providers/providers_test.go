@@ -7,6 +7,7 @@ package tlsproviders
 import (
 	"context"
 	"crypto/tls"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -66,13 +67,17 @@ func (anyFieldProvider) TLSConfig() (*tls.Config, error) { return &tls.Config{},
 func (a anyFieldProvider) Close(_ context.Context) error { close(a.done); return nil }
 
 func TestProviders_NonComparableValueClosedOnce(t *testing.T) {
-	p := &Providers{}
-	v := anyFieldProvider{v: []string{"x"}, done: make(chan struct{})}
-	require.NotPanics(t, func() {
-		p.Register(v)
-		p.Register(v) // the same value again
-		p.Close(t.Context(), nil)
-	})
+	for name, field := range map[string]any{"slice": []string{"x"}, "NaN": math.NaN()} {
+		t.Run(name, func(t *testing.T) {
+			p := &Providers{}
+			v := anyFieldProvider{v: field, done: make(chan struct{})}
+			require.NotPanics(t, func() {
+				p.Register(v)
+				p.Register(v) // the same value again
+				p.Close(t.Context(), nil)
+			})
+		})
+	}
 }
 
 func TestProviders_Close_ReRegisteredClosesOnce(t *testing.T) {

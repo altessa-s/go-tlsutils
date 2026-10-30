@@ -95,7 +95,7 @@ func (p *Providers) Register(provider Provider) {
 	// Only a provider with a comparable identity is kept: a non-comparable
 	// value cannot be told apart from the same value registered again, and
 	// closing it twice is worse than leaving it to its owner.
-	if old, ok := p.providers[provider.Type()]; ok && isComparable(old) && !sameProvider(old, provider) {
+	if old, ok := p.providers[provider.Type()]; ok && hasIdentity(old) && !sameProvider(old, provider) {
 		p.replaced = append(p.replaced, old)
 	}
 	// A provider registered again is active, not displaced.
@@ -107,12 +107,14 @@ func (p *Providers) Register(provider Provider) {
 // that cannot be compared (a non-comparable type, or an interface field
 // holding a slice or map) are never the same, which avoids a panic on ==.
 func sameProvider(a, b Provider) bool {
-	return reflect.TypeOf(a) == reflect.TypeOf(b) && isComparable(a) && isComparable(b) && a == b
+	return reflect.TypeOf(a) == reflect.TypeOf(b) && hasIdentity(a) && hasIdentity(b) && a == b
 }
 
-// isComparable reports whether p can be compared with == without panicking.
-func isComparable(p Provider) bool {
-	return reflect.ValueOf(p).Comparable()
+// hasIdentity reports whether p can be compared with == without panicking
+// and equals itself (a value holding NaN does not), so it can be recognized
+// when registered again.
+func hasIdentity(p Provider) bool {
+	return reflect.ValueOf(p).Comparable() && p == p //nolint:gocritic // self-comparison rejects NaN-holding values
 }
 
 // Get returns a provider by type.
