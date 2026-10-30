@@ -14,6 +14,7 @@ import (
 	"time"
 
 	coreerrs "github.com/altessa-s/go-atlas-core/errors"
+	"github.com/altessa-s/go-atlas-net/urlx"
 	tlsutils "github.com/altessa-s/go-tlsutils"
 	vaultApi "github.com/hashicorp/vault/api"
 )
@@ -97,8 +98,10 @@ func WithRenewableToken(t *Token) Option {
 	}
 }
 
+// parseEndpoint requires an absolute http or https URL with a host and no
+// userinfo, query or fragment, and keeps only its scheme and host.
 func parseEndpoint(endpoint string) (*url.URL, error) {
-	u, err := url.Parse(endpoint)
+	u, err := urlx.ParseBaseURL(endpoint)
 	if err != nil {
 		return nil, coreerrs.Wrapf(ErrInvalidEndpoint, "%v", err)
 	}

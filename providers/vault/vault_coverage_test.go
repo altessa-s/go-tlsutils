@@ -254,8 +254,15 @@ func TestNew_OptionErrors(t *testing.T) {
 	_, err := tlsvault.New(tlsvault.WithIPSubjectAlternativeNames("not-an-ip"))
 	require.ErrorIs(t, err, tlsvault.ErrInvalidIP)
 
-	_, err = tlsvault.New(tlsvault.WithEndpoint("://bad"))
-	require.ErrorIs(t, err, tlsvault.ErrInvalidEndpoint)
+	for _, endpoint := range []string{
+		"://bad", "", "vault.example.com", "vault:8200", "ftp://vault:8200", "https://user:pw@vault:8200", "https://vault:8200?x=1",
+	} {
+		_, err = tlsvault.New(tlsvault.WithEndpoint(endpoint))
+		require.ErrorIs(t, err, tlsvault.ErrInvalidEndpoint, endpoint)
+	}
+
+	_, err = tlsvault.New(tlsvault.WithEndpoint("https://vault.example.com:8200"))
+	require.NoError(t, err)
 }
 
 func TestWithRenewableToken_RejectsMissingToken(t *testing.T) {
