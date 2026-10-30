@@ -1,0 +1,7 @@
+# file
+
+```go
+import "github.com/altessa-s/go-tlsutils/providers/file"
+```
+
+Package `tlsfile` provides a file-based TLS certificate provider with optional automatic reloading. Supports password-protected keys and OCSP stapling.

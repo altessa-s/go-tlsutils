@@ -1,0 +1,314 @@
+// Copyright 2021-2026 ALTESSA SOLUTIONS INC. All rights reserved.
+// Use of this source code is governed by license that can be found in
+// the LICENSE file.
+
+package ocsp
+
+import (
+	"context"
+	"crypto/tls"
+	"encoding/base64"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/altessa-s/go-tlsutils/internal/testhelpers"
+
+	xocsp "golang.org/x/crypto/ocsp"
+)
+
+// countingResponder serves CA-signed OCSP responses whose status and
+// nextUpdate are read per request; fail makes it answer 500.
+type countingResponder struct {
+	srv        *httptest.Server
+	hits       atomic.Int32
+	fail       atomic.Bool
+	status     atomic.Int32
+	nextUpdate atomic.Int64 // offset from now, nanoseconds
+}
+
+func newCountingResponder(t *testing.T, ca *testhelpers.CA, nextUpdate time.Duration) *countingResponder {
+	t.Helper()
+	r := &countingResponder{}
+	r.status.Store(int32(xocsp.Good))
+	r.nextUpdate.Store(int64(nextUpdate))
+	r.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		r.hits.Add(1)
+		if r.fail.Load() {
+			http.Error(w, "down", http.StatusInternalServerError)
+			return
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		parsed, err := xocsp.ParseRequest(body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		now := time.Now()
+		resp := xocsp.Response{
+			Status:       int(r.status.Load()),
+			SerialNumber: parsed.SerialNumber,
+			ThisUpdate:   now.Add(-time.Minute),
+			NextUpdate:   now.Add(time.Duration(r.nextUpdate.Load())),
+		}
+		if resp.Status == xocsp.Revoked {
+			resp.RevokedAt = now.Add(-time.Hour)
+		}
+		der, err := xocsp.CreateResponse(ca.Cert, ca.Cert, resp, ca.Key)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write(der)
+	}))
+	t.Cleanup(r.srv.Close)
+	return r
+}
+
+func chainWith(t *testing.T, ca *testhelpers.CA, urls ...string) *tls.Certificate {
+	t.Helper()
+	leaf := ca.SignLeaf(t, testhelpers.WithOCSPServers(urls...))
+	leaf.Certificate = append(leaf.Certificate, ca.Cert.Raw)
+	return &leaf
+}
+
+func TestNeedsRefreshAndRunRefreshCycle(t *testing.T) {
+	t.Parallel()
+	ca := testhelpers.NewCA(t)
+	r := newCountingResponder(t, ca, 3*time.Hour)
+	cert := chainWith(t, ca, r.srv.URL)
+	s := NewOCSPStapler(WithLogger(slog.New(slog.DiscardHandler)))
+
+	require.True(t, s.NeedsRefresh(cert), "an uncached certificate needs a refresh")
+
+	// Not cached yet: the cycle fetches and caches.
+	require.NoError(t, s.RunRefreshCycle(t.Context(), cert))
+	require.Equal(t, int32(1), r.hits.Load())
+	require.False(t, s.NeedsRefresh(cert))
+
+	// Fresh: nothing is fetched.
+	require.NoError(t, s.RunRefreshCycle(t.Context(), cert))
+	require.Equal(t, int32(1), r.hits.Load())
+
+	// Close to expiry: the cycle refetches and updates the entry.
+	s.mu.RLock()
+	entry := s.cache[cacheKeyOf(cert)]
+	s.mu.RUnlock()
+	entry.mu.Lock()
+	entry.nextUpdate = time.Now().Add(10 * time.Minute)
+	entry.mu.Unlock()
+	require.True(t, s.NeedsRefresh(cert))
+
+	require.NoError(t, s.RunRefreshCycle(t.Context(), cert))
+	require.Equal(t, int32(2), r.hits.Load())
+	require.False(t, s.NeedsRefresh(cert))
+
+	// A failing responder surfaces the error and keeps the old entry.
+	entry.mu.Lock()
+	entry.nextUpdate = time.Now().Add(10 * time.Minute)
+	old := entry.response
+	entry.mu.Unlock()
+	r.fail.Store(true)
+	require.Error(t, s.RunRefreshCycle(t.Context(), cert))
+	entry.mu.RLock()
+	require.Equal(t, old, entry.response)
+	entry.mu.RUnlock()
+
+	// A malformed leaf cannot be refreshed.
+	bad := &tls.Certificate{Certificate: [][]byte{[]byte("junk")}}
+	s.mu.Lock()
+	s.cache[cacheKeyOf(bad)] = &ocspCacheEntry{nextUpdate: time.Now()}
+	s.mu.Unlock()
+	require.Error(t, s.RunRefreshCycle(t.Context(), bad))
+}
+
+func cacheKeyOf(cert *tls.Certificate) string {
+	return base64.StdEncoding.EncodeToString(cert.Certificate[0])
+}
+
+func TestRunRefreshAll_RefreshesCachedAndJoinsErrors(t *testing.T) {
+	t.Parallel()
+	ca := testhelpers.NewCA(t)
+	good := newCountingResponder(t, ca, 3*time.Hour)
+	flaky := newCountingResponder(t, ca, 3*time.Hour)
+	s := NewOCSPStapler()
+
+	c1 := chainWith(t, ca, good.srv.URL)
+	c2 := chainWith(t, ca, flaky.srv.URL)
+	_, err := s.GetOCSPStaple(t.Context(), c1)
+	require.NoError(t, err)
+	_, err = s.GetOCSPStaple(t.Context(), c2)
+	require.NoError(t, err)
+
+	s.mu.RLock()
+	for _, e := range s.cache {
+		e.mu.Lock()
+		e.nextUpdate = time.Now().Add(time.Minute)
+		e.mu.Unlock()
+	}
+	s.mu.RUnlock()
+	flaky.fail.Store(true)
+
+	err = s.RunRefreshAll(t.Context())
+	require.Error(t, err)
+	require.Equal(t, int32(2), good.hits.Load())
+	require.Equal(t, int32(2), flaky.hits.Load())
+	require.False(t, s.NeedsRefresh(c1))
+	require.True(t, s.NeedsRefresh(c2))
+}
+
+func TestRefreshAllFunc_RefreshesCache(t *testing.T) {
+	t.Parallel()
+	ca := testhelpers.NewCA(t)
+	r := newCountingResponder(t, ca, 3*time.Hour)
+	s := NewOCSPStapler()
+
+	cert := chainWith(t, ca, r.srv.URL)
+	_, err := s.GetOCSPStaple(t.Context(), cert)
+	require.NoError(t, err)
+	s.mu.RLock()
+	for _, e := range s.cache {
+		e.mu.Lock()
+		e.nextUpdate = time.Now().Add(time.Minute)
+		e.mu.Unlock()
+	}
+	s.mu.RUnlock()
+
+	fn := s.RefreshAllFunc()
+	require.NoError(t, s.RunRefreshAll(t.Context()), "RefreshAllFunc alone does not mark the refresh scheduler-managed")
+	require.Equal(t, int32(2), r.hits.Load())
+
+	s.MarkSchedulerManaged()
+	require.ErrorIs(t, s.RunRefreshAll(t.Context()), ErrSchedulerManaged)
+	s.mu.RLock()
+	for _, e := range s.cache {
+		e.mu.Lock()
+		e.nextUpdate = time.Now().Add(time.Minute)
+		e.mu.Unlock()
+	}
+	s.mu.RUnlock()
+	require.NoError(t, fn(t.Context()))
+	require.Equal(t, int32(3), r.hits.Load(), "the scheduler func still refreshes the cache")
+}
+
+type countingTransport struct {
+	n atomic.Int32
+}
+
+func (c *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.n.Add(1)
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+func TestFetch_RetryAndFallbackServers(t *testing.T) {
+	t.Parallel()
+	ca := testhelpers.NewCA(t)
+	down := newCountingResponder(t, ca, 3*time.Hour)
+	down.fail.Store(true)
+	up := newCountingResponder(t, ca, 3*time.Hour)
+	tr := &countingTransport{}
+
+	s := NewOCSPStapler(
+		WithHTTPClient(&http.Client{Transport: tr}),
+		WithRetryPolicy(&mockRetryPolicy{maxAttempts: 2, nextDelay: time.Millisecond, shouldRetry: true}),
+		WithMaxResponseAge(time.Hour),
+	)
+	staple, err := s.GetOCSPStaple(t.Context(), chainWith(t, ca, down.srv.URL, up.srv.URL))
+	require.NoError(t, err)
+	require.NotEmpty(t, staple)
+	require.GreaterOrEqual(t, down.hits.Load(), int32(2), "the failing server is retried")
+	require.Equal(t, int32(1), up.hits.Load())
+	require.Equal(t, down.hits.Load()+up.hits.Load(), tr.n.Load(), "the configured HTTP client is used")
+}
+
+func TestFetch_Failures(t *testing.T) {
+	t.Parallel()
+	ca := testhelpers.NewCA(t)
+	s := NewOCSPStapler()
+
+	noServer := ca.SignLeaf(t)
+	noServer.Certificate = append(noServer.Certificate, ca.Cert.Raw)
+	_, err := s.GetOCSPStaple(t.Context(), &noServer)
+	require.ErrorContains(t, err, "no OCSP server")
+
+	r := newCountingResponder(t, ca, 3*time.Hour)
+	noIssuer := ca.SignLeaf(t, testhelpers.WithOCSPServers(r.srv.URL))
+	noIssuer.Leaf = nil
+	_, err = s.GetOCSPStaple(t.Context(), &tls.Certificate{Certificate: noIssuer.Certificate[:1]})
+	require.ErrorContains(t, err, "issuer certificate not found")
+
+	badIssuer := &tls.Certificate{Certificate: [][]byte{noIssuer.Certificate[0], []byte("junk")}}
+	_, err = s.GetOCSPStaple(t.Context(), badIssuer)
+	require.Error(t, err)
+
+	_, err = s.GetOCSPStaple(t.Context(), &tls.Certificate{Certificate: [][]byte{[]byte("junk")}})
+	require.Error(t, err)
+
+	revoked := newCountingResponder(t, ca, 3*time.Hour)
+	revoked.status.Store(int32(xocsp.Revoked))
+	_, err = s.GetOCSPStaple(t.Context(), chainWith(t, ca, revoked.srv.URL))
+	require.ErrorContains(t, err, "not good")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = s.GetOCSPStaple(ctx, chainWith(t, ca, r.srv.URL))
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestFetch_FarNextUpdateIsCapped(t *testing.T) {
+	t.Parallel()
+	ca := testhelpers.NewCA(t)
+	r := newCountingResponder(t, ca, 30*24*time.Hour)
+	s := NewOCSPStapler()
+	cert := chainWith(t, ca, r.srv.URL)
+
+	_, err := s.GetOCSPStaple(t.Context(), cert)
+	require.NoError(t, err)
+	s.mu.RLock()
+	e := s.cache[cacheKeyOf(cert)]
+	s.mu.RUnlock()
+	require.WithinDuration(t, time.Now().Add(DefaultOCSPExpiry), e.nextUpdate, time.Minute)
+}
+
+func TestStapleCertificate(t *testing.T) {
+	t.Parallel()
+	ca := testhelpers.NewCA(t)
+	r := newCountingResponder(t, ca, 3*time.Hour)
+	cert := chainWith(t, ca, r.srv.URL)
+
+	got, err := StapleCertificate(t.Context(), nil, cert)
+	require.NoError(t, err)
+	require.Same(t, cert, got)
+
+	got, err = StapleCertificate(t.Context(), NewOCSPStapler(), nil)
+	require.NoError(t, err)
+	require.Nil(t, got)
+
+	got, err = StapleCertificate(t.Context(), NewOCSPStapler(), cert)
+	require.NoError(t, err)
+	require.NotEmpty(t, got.OCSPStaple)
+	require.Empty(t, cert.OCSPStaple, "the input certificate is not mutated")
+
+	r.fail.Store(true)
+	_, err = StapleCertificate(t.Context(), NewOCSPStapler(WithFailureMode(FailureModeHard)), chainWith(t, ca, r.srv.URL))
+	require.Error(t, err)
+
+	got, err = StapleCertificate(t.Context(), NewOCSPStapler(), cert)
+	require.NoError(t, err)
+	require.Empty(t, got.OCSPStaple, "soft mode serves the certificate without a staple")
+}
+
+func TestFailureMode_ZeroValueStapler(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, DefaultFailureMode, (&Stapler{}).FailureMode())
+}
