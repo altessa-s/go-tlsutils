@@ -7,6 +7,9 @@ package tlsproviders
 import (
 	"context"
 	"iter"
+	"maps"
+	"reflect"
+	"slices"
 	"sync"
 )
 
@@ -65,10 +68,15 @@ var AvailableProviders = []ProviderType{
 type Providers struct {
 	mu        sync.RWMutex
 	providers map[ProviderType]Provider
+	// replaced holds providers displaced by Register; Close still closes
+	// them so their watchers and pollers do not outlive the collection.
+	replaced []Provider
 }
 
 // Register registers a TLS provider with the provider collection.
-// The provider's type is used as the registry key.
+// The provider's type is used as the registry key. A provider already
+// registered under the same type is replaced: Get and List no longer return
+// it, and [Providers.Close] still closes it.
 //
 // Example:
 //
@@ -80,7 +88,17 @@ func (p *Providers) Register(provider Provider) {
 	if p.providers == nil {
 		p.providers = make(map[ProviderType]Provider)
 	}
+	if old, ok := p.providers[provider.Type()]; ok && !sameProvider(old, provider) {
+		p.replaced = append(p.replaced, old)
+	}
 	p.providers[provider.Type()] = provider
+}
+
+// sameProvider reports whether a and b are the same provider value. Values of
+// a non-comparable type are never the same, which avoids a panic on ==.
+func sameProvider(a, b Provider) bool {
+	t := reflect.TypeOf(a)
+	return t == reflect.TypeOf(b) && t.Comparable() && a == b
 }
 
 // Get returns a provider by type.
@@ -100,7 +118,8 @@ func (p *Providers) Get(t ProviderType) (Provider, bool) {
 	return provider, ok
 }
 
-// Close closes all registered providers with the given context.
+// Close closes all registered providers, and those replaced by Register, with
+// the given context.
 // The context controls the graceful shutdown timeout for each provider.
 // The errCallback is invoked for each provider that returns an error.
 //
@@ -115,7 +134,7 @@ func (p *Providers) Close(ctx context.Context, errCallback func(p Provider, err 
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	for _, provider := range p.providers {
+	for _, provider := range slices.Concat(p.replaced, slices.Collect(maps.Values(p.providers))) {
 		if err := provider.Close(ctx); err != nil && errCallback != nil {
 			errCallback(provider, err)
 		}

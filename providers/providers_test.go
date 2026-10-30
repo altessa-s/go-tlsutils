@@ -13,12 +13,45 @@ import (
 )
 
 type mockProvider struct {
-	typ ProviderType
+	typ    ProviderType
+	closed int
 }
 
 func (m *mockProvider) Type() ProviderType              { return m.typ }
 func (m *mockProvider) TLSConfig() (*tls.Config, error) { return &tls.Config{}, nil } //nolint:gosec
-func (m *mockProvider) Close(_ context.Context) error   { return nil }
+func (m *mockProvider) Close(_ context.Context) error   { m.closed++; return nil }
+
+// valueProvider is a non-comparable provider value: re-registering it must
+// not panic on ==.
+type valueProvider struct {
+	tags []string
+}
+
+func (valueProvider) Type() ProviderType              { return ProviderTypeS3 }
+func (valueProvider) TLSConfig() (*tls.Config, error) { return &tls.Config{}, nil } //nolint:gosec
+func (valueProvider) Close(_ context.Context) error   { return nil }
+
+func TestProviders_Close_ClosesReplaced(t *testing.T) {
+	p := &Providers{}
+	first := &mockProvider{typ: ProviderTypeFile}
+	second := &mockProvider{typ: ProviderTypeFile}
+	p.Register(first)
+	p.Register(second)
+	p.Register(second) // re-registering the active provider replaces nothing
+
+	got, ok := p.Get(ProviderTypeFile)
+	require.True(t, ok)
+	require.Same(t, second, got)
+
+	p.Close(t.Context(), nil)
+	require.Equal(t, 1, first.closed, "a replaced provider is closed")
+	require.Equal(t, 1, second.closed, "the active provider is closed once")
+
+	require.NotPanics(t, func() {
+		p.Register(valueProvider{})
+		p.Register(valueProvider{})
+	})
+}
 
 func TestProviderType_String(t *testing.T) {
 	require.Equal(t, "vault", ProviderTypeVault.String())
