@@ -130,7 +130,7 @@ func NewOCSPStapler(opts ...Option) *Stapler {
 	}
 
 	s := &Stapler{
-		cache:             make(map[string]*ocspCacheEntry),
+		cache: make(map[string]*ocspCacheEntry),
 		// The shared fetch is bounded by the first caller's deadline (carried
 		// over in GetOCSPStaple) and the HTTP client, not by the group: no
 		// group timeout ceiling and no cap on distinct certificates fetched
