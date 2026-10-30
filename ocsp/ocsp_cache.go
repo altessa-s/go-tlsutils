@@ -6,6 +6,7 @@ package ocsp
 
 import (
 	"crypto/tls"
+	"encoding/base64"
 	"sync"
 	"time"
 )
@@ -20,30 +21,48 @@ type ocspCacheEntry struct {
 	mu         sync.RWMutex
 }
 
-// evictOldestLocked removes the cache entry with the earliest nextUpdate.
-// Caller must hold s.mu in write mode. Returns true when an entry was
-// removed, false when the cache is already empty.
-func (s *Stapler) evictOldestLocked() bool {
+// cacheKey identifies the cache entry of cert by its leaf certificate.
+func cacheKey(cert *tls.Certificate) string {
+	return base64.StdEncoding.EncodeToString(cert.Certificate[0])
+}
+
+// store inserts entry under key, first making room when the cache is at
+// its cap and key is new.
+func (s *Stapler) store(key string, entry *ocspCacheEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.cache[key]; !exists && s.maxCacheEntries > 0 && len(s.cache) >= s.maxCacheEntries {
+		s.makeRoomLocked(time.Now())
+	}
+	s.cache[key] = entry
+}
+
+// makeRoomLocked frees at least one slot in a full cache with a single scan:
+// every expired entry is dropped, and when that leaves the cache full, the
+// entry closest to expiry is evicted. Dropping all expired entries at once
+// keeps the following inserts from scanning again. Caller must hold s.mu in
+// write mode.
+func (s *Stapler) makeRoomLocked(now time.Time) {
 	var (
 		oldestKey  string
 		oldestTime time.Time
-		first      = true
+		found      bool
 	)
 	for key, entry := range s.cache {
 		entry.mu.RLock()
 		t := entry.nextUpdate
 		entry.mu.RUnlock()
-		if first || t.Before(oldestTime) {
-			oldestKey = key
-			oldestTime = t
-			first = false
+		if now.After(t) {
+			delete(s.cache, key)
+			continue
+		}
+		if !found || t.Before(oldestTime) {
+			oldestKey, oldestTime, found = key, t, true
 		}
 	}
-	if first {
-		return false
+	if found && len(s.cache) >= s.maxCacheEntries {
+		delete(s.cache, oldestKey)
 	}
-	delete(s.cache, oldestKey)
-	return true
 }
 
 // removeExpiredEntries removes all expired cache entries.

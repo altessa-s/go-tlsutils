@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -172,10 +171,10 @@ func (s *Stapler) GetOCSPStaple(ctx context.Context, cert *tls.Certificate) ([]b
 		}
 	}
 
-	cacheKey := base64.StdEncoding.EncodeToString(cert.Certificate[0])
+	key := cacheKey(cert)
 
 	s.mu.RLock()
-	entry, exists := s.cache[cacheKey]
+	entry, exists := s.cache[key]
 	s.mu.RUnlock()
 
 	if exists {
@@ -199,23 +198,7 @@ func (s *Stapler) GetOCSPStaple(ctx context.Context, cert *tls.Certificate) ([]b
 		return nil, err
 	}
 
-	cacheEntry := &ocspCacheEntry{response: response, nextUpdate: nextUpdate}
-
-	s.mu.Lock()
-	// Enforce the cap before inserting. evictOldestLocked picks the
-	// entry whose nextUpdate is closest to "now" — expired entries go
-	// first, then the soonest-to-expire — so the eviction does
-	// minimum damage to the cache's hit rate.
-	if s.maxCacheEntries > 0 {
-		for len(s.cache) >= s.maxCacheEntries {
-			if !s.evictOldestLocked() {
-				break // pathological: no entries available to evict
-			}
-		}
-	}
-	s.cache[cacheKey] = cacheEntry
-	cacheEntry.cert = cert
-	s.mu.Unlock()
+	s.store(key, &ocspCacheEntry{response: response, nextUpdate: nextUpdate, cert: cert})
 
 	return response, nil
 }
@@ -239,10 +222,10 @@ func (s *Stapler) NeedsRefresh(cert *tls.Certificate) bool {
 		return false
 	}
 
-	cacheKey := base64.StdEncoding.EncodeToString(cert.Certificate[0])
+	key := cacheKey(cert)
 
 	s.mu.RLock()
-	entry, exists := s.cache[cacheKey]
+	entry, exists := s.cache[key]
 	s.mu.RUnlock()
 
 	if !exists {
@@ -275,11 +258,11 @@ func (s *Stapler) RunRefreshCycle(ctx context.Context, cert *tls.Certificate) er
 		return errors.New("invalid certificate")
 	}
 
-	cacheKey := base64.StdEncoding.EncodeToString(cert.Certificate[0])
+	key := cacheKey(cert)
 
 	// Check if refresh is needed
 	s.mu.RLock()
-	entry, exists := s.cache[cacheKey]
+	entry, exists := s.cache[key]
 	s.mu.RUnlock()
 
 	// If no cache entry exists, fetch and cache

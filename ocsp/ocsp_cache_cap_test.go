@@ -5,6 +5,8 @@
 package ocsp
 
 import (
+	"maps"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -29,15 +31,9 @@ func TestStapler_CacheCap_EvictsOldestWhenFull(t *testing.T) {
 	s.cache["b"] = &ocspCacheEntry{nextUpdate: base.Add(time.Minute)}
 	s.mu.Unlock()
 
-	// Insert a third entry — same fast-path the GetOCSPStaple Lock
-	// branch uses. Eviction must remove "a" (oldest nextUpdate) before
-	// inserting.
-	s.mu.Lock()
-	for len(s.cache) >= s.maxCacheEntries {
-		require.True(t, s.evictOldestLocked(), "evictOldestLocked must succeed while cache is non-empty")
-	}
-	s.cache["c"] = &ocspCacheEntry{nextUpdate: base.Add(2 * time.Minute)}
-	s.mu.Unlock()
+	// Insert a third entry through the same path GetOCSPStaple uses.
+	// Eviction must remove "a" (oldest nextUpdate) before inserting.
+	s.store("c", &ocspCacheEntry{nextUpdate: base.Add(2 * time.Minute)})
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -49,6 +45,44 @@ func TestStapler_CacheCap_EvictsOldestWhenFull(t *testing.T) {
 	require.False(t, hasA, "oldest entry (a) must have been evicted")
 	require.True(t, hasB, "b must survive — newer than a")
 	require.True(t, hasC, "c must survive — just inserted")
+}
+
+// TestStapler_CacheCap_DropsAllExpiredBeforeEvicting pins that a full cache
+// sheds every expired entry in one pass and keeps the live ones.
+func TestStapler_CacheCap_DropsAllExpiredBeforeEvicting(t *testing.T) {
+	t.Parallel()
+
+	s := NewOCSPStapler(WithMaxCacheEntries(3))
+
+	now := time.Now()
+	s.mu.Lock()
+	s.cache["expired1"] = &ocspCacheEntry{nextUpdate: now.Add(-time.Hour)}
+	s.cache["expired2"] = &ocspCacheEntry{nextUpdate: now.Add(-time.Minute)}
+	s.cache["live"] = &ocspCacheEntry{nextUpdate: now.Add(time.Hour)}
+	s.mu.Unlock()
+
+	s.store("new", &ocspCacheEntry{nextUpdate: now.Add(2 * time.Hour)})
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	require.ElementsMatch(t, []string{"live", "new"}, slices.Collect(maps.Keys(s.cache)))
+}
+
+// TestStapler_CacheCap_ReplacingKeyDoesNotEvict pins that refreshing an
+// existing key in a full cache evicts nothing.
+func TestStapler_CacheCap_ReplacingKeyDoesNotEvict(t *testing.T) {
+	t.Parallel()
+
+	s := NewOCSPStapler(WithMaxCacheEntries(2))
+
+	later := time.Now().Add(time.Hour)
+	s.store("a", &ocspCacheEntry{nextUpdate: later})
+	s.store("b", &ocspCacheEntry{nextUpdate: later.Add(time.Minute)})
+	s.store("a", &ocspCacheEntry{nextUpdate: later.Add(2 * time.Minute)})
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	require.ElementsMatch(t, []string{"a", "b"}, slices.Collect(maps.Keys(s.cache)))
 }
 
 // TestStapler_CacheCap_DefaultIsApplied confirms a freshly-constructed
