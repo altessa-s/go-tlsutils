@@ -24,6 +24,7 @@ is never cached past that deadline. `WithCompression` requests gzip-encoded resp
 | `MarkSchedulerManaged` | After a successful registration, direct `RunRefreshAll` returns `ErrSchedulerManaged` |
 | `RegisterRefreshAllSchedulerFunc` | Marks managed, then returns `RefreshAllFunc`. Call only when registration cannot fail |
 | `NeedsRefresh`        | Report whether a certificate's cached response needs refreshing |
+| `FailureModeReporter` | Optional stapler interface read for `FailureMode`; a decorator around a stapler must forward it, or Hard degrades to Soft |
 
 ## StapleOCSPToConfig and SNI
 

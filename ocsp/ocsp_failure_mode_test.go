@@ -64,6 +64,38 @@ func TestStapleOrEnforce_SoftModeReturnsCertOnFetchError(t *testing.T) {
 	require.Same(t, cert, got, "Soft mode must return the ORIGINAL certificate unmodified — no staple, no clone")
 }
 
+// decoratedStapler wraps a stapler the way a metrics or tracing decorator
+// would, without forwarding FailureModeReporter; forwardingStapler adds it.
+type decoratedStapler struct {
+	inner *failingStapler
+}
+
+func (d decoratedStapler) GetOCSPStaple(ctx context.Context, cert *tls.Certificate) ([]byte, error) {
+	return d.inner.GetOCSPStaple(ctx, cert)
+}
+func (d decoratedStapler) RunRefreshAll(ctx context.Context) error { return d.inner.RunRefreshAll(ctx) }
+
+type forwardingStapler struct{ decoratedStapler }
+
+func (f forwardingStapler) FailureMode() FailureMode { return f.inner.FailureMode() }
+
+// TestStapleCertificate_DecoratorKeepsHardMode pins the FailureModeReporter
+// contract: a decorator that forwards it keeps Hard mode, one that does not
+// is treated as Soft.
+func TestStapleCertificate_DecoratorKeepsHardMode(t *testing.T) {
+	t.Parallel()
+
+	inner := &failingStapler{err: errors.New("responder unreachable"), failureMode: FailureModeHard}
+	cert := &tls.Certificate{Certificate: [][]byte{{0x01}}}
+
+	_, err := StapleCertificate(t.Context(), forwardingStapler{decoratedStapler{inner: inner}}, cert)
+	require.Error(t, err, "a forwarding decorator keeps Hard mode")
+
+	got, err := StapleCertificate(t.Context(), decoratedStapler{inner: inner}, cert)
+	require.NoError(t, err, "a decorator without FailureModeReporter is treated as Soft")
+	require.Same(t, cert, got)
+}
+
 // TestStapler_FailureMode_DefaultsToSoft confirms a freshly-constructed
 // stapler without WithFailureMode reports Soft — preserves legacy
 // behavior for callers that don't opt in.

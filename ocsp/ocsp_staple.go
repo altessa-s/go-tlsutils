@@ -16,20 +16,25 @@ import (
 	tlsutils "github.com/altessa-s/go-tlsutils"
 )
 
-// failureModeAware is an optional interface satisfied by OCSP staplers
-// that expose a [FailureMode]. [StapleOCSPToConfig] consults it to
-// decide whether a failed staple-fetch should abort the handshake
-// (Hard) or fall through with the unstapled certificate (Soft).
-// Implemented by [*Stapler]; custom OCSPStapler implementations
-// without this method fall back to Soft for backwards compatibility.
-type failureModeAware interface {
+// FailureModeReporter is an optional interface for OCSP staplers that expose
+// a [FailureMode]. [StapleOCSPToConfig] and [StapleCertificate] consult it to
+// decide whether a failed staple-fetch aborts the handshake (Hard) or falls
+// through with the unstapled certificate (Soft). It is implemented by
+// [*Stapler]; an OCSPStapler without it is treated as Soft.
+//
+// A decorator around a stapler (metrics, tracing, caching) must implement
+// FailureModeReporter by forwarding to the wrapped stapler, or a Hard-mode
+// stapler silently degrades to Soft.
+type FailureModeReporter interface {
 	FailureMode() FailureMode
 }
+
+var _ FailureModeReporter = (*Stapler)(nil)
 
 // resolveFailureMode reports the stapler's configured FailureMode,
 // defaulting to Soft for staplers that don't expose one.
 func resolveFailureMode(stapler tlsutils.OCSPStapler) FailureMode {
-	if fma, ok := stapler.(failureModeAware); ok {
+	if fma, ok := stapler.(FailureModeReporter); ok {
 		return fma.FailureMode()
 	}
 	return FailureModeSoft
