@@ -7,6 +7,7 @@ package tlsutils_test
 import (
 	"crypto/tls"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -51,6 +52,17 @@ func TestDefaultTLSConfig(t *testing.T) {
 	config := tlsutils.DefaultTLSConfig()
 	require.Equal(t, uint16(tls.VersionTLS12), config.MinVersion)
 	require.NotEmpty(t, config.CipherSuites)
+}
+
+func TestDefaultTLSConfig_CipherSuitesAreCopies(t *testing.T) {
+	t.Parallel()
+	want := slices.Clone(tlsutils.DefaultTLSConfig().CipherSuites)
+
+	clear(tlsutils.DefaultTLSConfig().CipherSuites)
+	clear(tlsutils.DefaultClientTLSConfig("example.com").CipherSuites)
+
+	require.Equal(t, want, tlsutils.DefaultTLSConfig().CipherSuites)
+	require.Equal(t, want, tlsutils.DefaultClientTLSConfig("example.com").CipherSuites)
 }
 
 func TestDefaultClientTLSConfig(t *testing.T) {

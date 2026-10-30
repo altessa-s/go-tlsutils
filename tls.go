@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/youmark/pkcs8"
@@ -226,7 +227,7 @@ func LoadFromConcatenatedFile(certKeyFilePath, keyPassword string) (*tls.Certifi
 func DefaultTLSConfig() *tls.Config {
 	return &tls.Config{
 		MinVersion:   tls.VersionTLS12,
-		CipherSuites: cipherSuits,
+		CipherSuites: slices.Clone(cipherSuits),
 	}
 }
 
@@ -260,7 +261,7 @@ func DefaultTLSConfigStrict() *tls.Config {
 func DefaultClientTLSConfig(serverName string) *tls.Config {
 	return &tls.Config{
 		MinVersion:   tls.VersionTLS12,
-		CipherSuites: cipherSuits,
+		CipherSuites: slices.Clone(cipherSuits),
 		ServerName:   serverName,
 	}
 }
