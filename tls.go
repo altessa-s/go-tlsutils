@@ -12,12 +12,15 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"slices"
 	"strings"
 
 	"github.com/youmark/pkcs8"
+
+	"github.com/altessa-s/go-atlas-core/io/files"
 
 	coreerrs "github.com/altessa-s/go-atlas-core/errors"
 )
@@ -66,20 +69,26 @@ var cipherSuits = []uint16{
 	tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 }
 
-// checkKeyFilePermissions verifies that a private key file is not accessible
-// by group or others. Returns an error if permissions exceed 0600.
-func checkKeyFilePermissions(path string) error {
-	info, err := os.Stat(path)
+// readKeyFile reads a private key file that must be a regular file not
+// accessible by group or others (at most 0600). The permissions are checked
+// on the descriptor that is then read, so the file cannot be swapped between
+// the check and the read.
+func readKeyFile(path string) ([]byte, error) {
+	f, err := files.OpenRegular(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	defer func() { _ = f.Close() }()
 
-	mode := info.Mode().Perm()
-	if mode&^maxKeyFilePermissions != 0 {
-		return fmt.Errorf("private key file %q has insecure permissions %04o, maximum allowed is %04o",
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if mode := info.Mode().Perm(); mode&^maxKeyFilePermissions != 0 {
+		return nil, fmt.Errorf("private key file %q has insecure permissions %04o, maximum allowed is %04o",
 			path, mode, maxKeyFilePermissions)
 	}
-	return nil
+	return io.ReadAll(f)
 }
 
 // loadPEM builds a certificate from PEM data holding the certificate chain
@@ -170,19 +179,12 @@ func LoadFromBytes(certPem, keyPem []byte, keyPassword string) (*tls.Certificate
 //		log.Fatal(err)
 //	}
 func LoadFromFile(keyPath, certPath, keyPassword string) (*tls.Certificate, error) {
-	// Read certificate file with context check
-	certPem, err := readFile(certPath)
+	certPem, err := files.ReadRegular(certPath)
 	if err != nil {
 		return nil, err
 	}
 
-	// Verify key file permissions before reading
-	if permErr := checkKeyFilePermissions(keyPath); permErr != nil {
-		return nil, permErr
-	}
-
-	// Read key file with context check
-	keyPem, err := readFile(keyPath)
+	keyPem, err := readKeyFile(keyPath)
 	if err != nil {
 		return nil, err
 	}
@@ -202,12 +204,7 @@ func LoadFromFile(keyPath, certPath, keyPassword string) (*tls.Certificate, erro
 //		log.Fatal(err)
 //	}
 func LoadFromConcatenatedFile(certKeyFilePath, keyPassword string) (*tls.Certificate, error) {
-	// Verify key file permissions before reading
-	if err := checkKeyFilePermissions(certKeyFilePath); err != nil {
-		return nil, err
-	}
-
-	data, err := readFile(certKeyFilePath)
+	data, err := readKeyFile(certKeyFilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +392,7 @@ func BuildCAPool(system bool, caPath ...string) (*x509.CertPool, error) {
 	}
 
 	for _, path := range caPath {
-		caPem, err := readFile(path)
+		caPem, err := files.ReadRegular(path)
 		if err != nil {
 			return nil, err
 		}
@@ -406,16 +403,6 @@ func BuildCAPool(system bool, caPath ...string) (*x509.CertPool, error) {
 	}
 
 	return pool, nil
-}
-
-// readFile reads a file.
-// #nosec G304 -- path comes from trusted configuration, not user input
-func readFile(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
 }
 
 // ApplyMinTLSVersion resolves the YAML-supplied minVersion string into a
