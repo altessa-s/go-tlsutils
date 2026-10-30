@@ -14,7 +14,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/altessa-s/go-tlsutils/ocsp"
+	"github.com/altessa-s/go-tlsutils/providers/internal/certconfig"
 
 	corecontext "github.com/altessa-s/go-atlas-core/context"
 	tlsutils "github.com/altessa-s/go-tlsutils"
@@ -189,18 +189,7 @@ func (f *File) loadCertificate() error {
 		return err
 	}
 
-	// Start with secure default TLS configuration
-	tlsConfig := tlsutils.DefaultTLSConfig()
-	tlsConfig.Certificates = []tls.Certificate{*cert}
-
-	// Install the OCSP stapling callback before publishing: once the config is
-	// visible to TLSConfig it must not be mutated, or a concurrent Clone races
-	// with the write and may return a config without the stapling callback.
-	if f.ocspStapler != nil {
-		if err := ocsp.StapleOCSPToConfig(tlsConfig, f.ocspStapler); err != nil {
-			f.logger.WarnContext(f.ctx, "failed to apply OCSP stapling to reloaded certificate", slog.Any("error", err))
-		}
-	}
+	tlsConfig := certconfig.Build(f.ctx, cert, f.ocspStapler, f.logger)
 
 	f.mu.Lock()
 	f.tlsConfig = tlsConfig
@@ -211,14 +200,7 @@ func (f *File) loadCertificate() error {
 		"key_file", f.keyFile,
 		"ocsp_enabled", f.ocspStapler != nil)
 
-	// Notify about reload if channel is set
-	if f.options.reloadNotifyChan != nil {
-		select {
-		case f.options.reloadNotifyChan <- struct{}{}:
-		default:
-			// Don't block if channel is full
-		}
-	}
+	certconfig.Notify(f.options.reloadNotifyChan)
 
 	return nil
 }

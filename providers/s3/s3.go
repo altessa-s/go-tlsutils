@@ -17,7 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/altessa-s/go-tlsutils/ocsp"
+	"github.com/altessa-s/go-tlsutils/providers/internal/certconfig"
 
 	corecontext "github.com/altessa-s/go-atlas-core/context"
 	tlsutils "github.com/altessa-s/go-tlsutils"
@@ -187,18 +187,7 @@ func (p *S3) loadCertificate(ctx context.Context) error {
 		return fmt.Errorf("parsing certificate: %w", err)
 	}
 
-	tlsConfig := tlsutils.DefaultTLSConfig()
-	tlsConfig.Certificates = []tls.Certificate{*cert}
-
-	// Install the OCSP stapling callback before publishing: once the config is
-	// visible to TLSConfig it must not be mutated, or a concurrent Clone races
-	// with the write and may return a config without the stapling callback.
-	if p.ocspStapler != nil {
-		//nolint:contextcheck // closures obtain context from TLS handshake info, not from caller
-		if err := ocsp.StapleOCSPToConfig(tlsConfig, p.ocspStapler); err != nil {
-			p.logger.WarnContext(ctx, "failed to apply OCSP stapling to reloaded certificate", slog.Any("error", err))
-		}
-	}
+	tlsConfig := certconfig.Build(ctx, cert, p.ocspStapler, p.logger)
 
 	p.mu.Lock()
 	p.tlsConfig = tlsConfig
@@ -212,13 +201,7 @@ func (p *S3) loadCertificate(ctx context.Context) error {
 		"key_key", p.privKeyKey,
 		"ocsp_enabled", p.ocspStapler != nil)
 
-	// Notify about reload if channel is set
-	if p.options.reloadNotifyChan != nil {
-		select {
-		case p.options.reloadNotifyChan <- struct{}{}:
-		default:
-		}
-	}
+	certconfig.Notify(p.options.reloadNotifyChan)
 
 	return nil
 }
