@@ -190,16 +190,22 @@ func (s *Stapler) GetOCSPStaple(ctx context.Context, cert *tls.Certificate) ([]b
 	}
 
 	// Concurrent handshakes missing the cache for the same certificate share
-	// one fetch. The shared fetch drops the first caller's cancellation, so
-	// its deadline (the handshake timeout) is carried over explicitly; every
-	// caller still stops waiting on its own context.
-	deadline, hasDeadline := ctx.Deadline()
+	// one fetch. The group runs it under context.WithoutCancel, so the first
+	// caller's cancellation and deadline are carried over explicitly: the
+	// fetch ends when that caller's context does, exactly as an unshared
+	// fetch would, and never outlives it. Callers that joined receive the
+	// same result; every caller still stops waiting on its own context.
+	first := ctx
 	return s.fetches.Do(ctx, key, func(ctx context.Context) ([]byte, error) {
-		if hasDeadline {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithDeadline(ctx, deadline)
-			defer cancel()
+		if deadline, ok := first.Deadline(); ok {
+			var cancelDeadline context.CancelFunc
+			ctx, cancelDeadline = context.WithDeadline(ctx, deadline)
+			defer cancelDeadline()
 		}
+		ctx, cancel := context.WithCancelCause(ctx)
+		defer cancel(nil)
+		stop := context.AfterFunc(first, func() { cancel(context.Cause(first)) })
+		defer stop()
 		// A fetch that finished between the cache check and joining stored
 		// its result already.
 		if response, ok := s.cachedResponse(key); ok {

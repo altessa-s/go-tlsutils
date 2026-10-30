@@ -281,6 +281,43 @@ func TestGetOCSPStaple_SharedFetchKeepsCallerDeadline(t *testing.T) {
 	require.Equal(t, deadline, seen, "the request runs under the caller's deadline, not a shorter group timeout")
 }
 
+// TestGetOCSPStaple_CancelledFirstCallerRetiresFetch pins that a shared fetch
+// never outlives the caller that started it: with no deadline and an HTTP
+// client without a timeout, cancelling that caller ends the stalled request,
+// and a later caller gets a fresh fetch instead of joining a stranded one.
+func TestGetOCSPStaple_CancelledFirstCallerRetiresFetch(t *testing.T) {
+	t.Parallel()
+	ca := testhelpers.NewCA(t)
+	r := newCountingResponder(t, ca, 3*time.Hour)
+	cert := chainWith(t, ca, r.srv.URL)
+
+	entered := make(chan struct{})
+	var stalled atomic.Bool
+	s := NewOCSPStapler(WithHTTPClient(&http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if stalled.CompareAndSwap(false, true) {
+			close(entered) // the responder stalls on the first request
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		}
+		return http.DefaultTransport.RoundTrip(req)
+	})}))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	errc := make(chan error, 1)
+	go func() {
+		_, err := s.GetOCSPStaple(ctx, cert)
+		errc <- err
+	}()
+	<-entered
+	cancel()
+	require.ErrorIs(t, <-errc, context.Canceled)
+
+	require.Eventually(t, func() bool {
+		_, err := s.GetOCSPStaple(t.Context(), cert)
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond, "a later caller must not join the stalled fetch forever")
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
