@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -130,7 +131,15 @@ func NewOCSPStapler(opts ...Option) *Stapler {
 
 	s := &Stapler{
 		cache:             make(map[string]*ocspCacheEntry),
-		fetches:           singleflight.New[string, []byte](),
+		// The shared fetch is bounded by the first caller's deadline (carried
+		// over in GetOCSPStaple) and the HTTP client, not by the group: no
+		// group timeout ceiling and no cap on distinct certificates fetched
+		// at once (0 is unlimited). WithTimeout ignores non-positive values,
+		// so the ceiling is lifted with the largest duration.
+		fetches: singleflight.New[string, []byte](
+			singleflight.WithMaxConcurrent(0),
+			singleflight.WithTimeout(time.Duration(math.MaxInt64)),
+		),
 		httpClient:        httpClient,
 		retryPolicy:       o.retryPolicy,
 		logger:            logger,

@@ -251,6 +251,40 @@ func TestGetOCSPStaple_SharesConcurrentFetch(t *testing.T) {
 	require.Equal(t, int32(1), r.hits.Load(), "concurrent cache misses share one fetch")
 }
 
+// TestGetOCSPStaple_SharedFetchKeepsCallerDeadline pins the deadline handling
+// of the shared fetch: the first caller's deadline still bounds it, and no
+// group-level ceiling shortens a longer budget.
+func TestGetOCSPStaple_SharedFetchKeepsCallerDeadline(t *testing.T) {
+	t.Parallel()
+	ca := testhelpers.NewCA(t)
+	r := newCountingResponder(t, ca, 3*time.Hour)
+	cert := chainWith(t, ca, r.srv.URL)
+
+	gate := &gatedTransport{entered: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(func() { close(gate.release) })
+	s := NewOCSPStapler(WithHTTPClient(&http.Client{Transport: gate}))
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	_, err := s.GetOCSPStaple(ctx, cert)
+	require.ErrorIs(t, err, context.DeadlineExceeded, "the caller stops waiting at its own deadline")
+
+	var seen time.Time
+	ok := NewOCSPStapler(WithHTTPClient(&http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		seen, _ = req.Context().Deadline()
+		return http.DefaultTransport.RoundTrip(req)
+	})}))
+	ctx, cancel = context.WithTimeout(t.Context(), time.Hour)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	_, err = ok.GetOCSPStaple(ctx, cert)
+	require.NoError(t, err)
+	require.Equal(t, deadline, seen, "the request runs under the caller's deadline, not a shorter group timeout")
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func TestFetch_RetryAndFallbackServers(t *testing.T) {
 	t.Parallel()
 	ca := testhelpers.NewCA(t)
