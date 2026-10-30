@@ -6,6 +6,7 @@ package tlsfile_test
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -41,6 +42,23 @@ func TestNewWithCertAndKey_ValidCert(t *testing.T) {
 	defer f.Close(t.Context())
 
 	require.Equal(t, tlsproviders.ProviderTypeFile, f.Type())
+}
+
+// TestNewWithCertAndKey_ChecksKeyPermissions pins that the 0600 limit applies
+// to the key file, not the certificate.
+func TestNewWithCertAndKey_ChecksKeyPermissions(t *testing.T) {
+	t.Parallel()
+	certPEM, keyPEM, _ := testhelpers.SelfSignedCert(t)
+	certPath, keyPath := testhelpers.WriteTempCertFiles(t, certPEM, keyPEM)
+
+	require.NoError(t, os.Chmod(certPath, 0o644))
+	f, err := tlsfile.NewWithCertAndKey(certPath, keyPath, "")
+	require.NoError(t, err, "a world-readable certificate with a 0600 key loads")
+	require.NoError(t, f.Close(t.Context()))
+
+	require.NoError(t, os.Chmod(keyPath, 0o644))
+	_, err = tlsfile.NewWithCertAndKey(certPath, keyPath, "")
+	require.ErrorContains(t, err, "insecure permissions", "a world-readable key is rejected")
 }
 
 func TestFile_TLSConfig(t *testing.T) {

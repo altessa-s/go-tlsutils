@@ -184,7 +184,7 @@ func (f *File) cleanup() error {
 }
 
 func (f *File) loadCertificate() error {
-	cert, err := tlsutils.LoadFromFile(f.certFile, f.keyFile, f.keyPassword)
+	cert, err := tlsutils.LoadFromFile(f.keyFile, f.certFile, f.keyPassword)
 	if err != nil {
 		return err
 	}
