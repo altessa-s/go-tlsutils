@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -80,70 +81,68 @@ func checkKeyFilePermissions(path string) error {
 	return nil
 }
 
-// loadWithDecryption attempts to load a certificate using modern PKCS#8 decryption.
-func loadWithDecryption(certPem, keyPem []byte, keyPassword string) (*tls.Certificate, error) {
-	// Parse the certificate
-	certBlock, _ := pem.Decode(certPem)
-	if certBlock == nil || certBlock.Type != pemTypeCertificate {
-		return nil, fmt.Errorf("failed to parse certificate PEM")
-	}
-
-	// Parse the private key
-	keyBlock, _ := pem.Decode(keyPem)
-	if keyBlock == nil {
-		return nil, fmt.Errorf("failed to parse private key PEM")
-	}
-
-	var privateKey any
-	var err error
-
-	// Try to decrypt if it's encrypted PKCS#8
-	if keyBlock.Type == "ENCRYPTED PRIVATE KEY" {
-		// Use youmark/pkcs8 library for encrypted PKCS#8
-		if keyPassword == "" {
-			return nil, fmt.Errorf("password required for encrypted PKCS#8 key")
+// loadPEM builds a certificate from PEM data holding the certificate chain
+// (leaf first) and one private key, in any order. Every CERTIFICATE block is
+// kept so the chain reaches the issuer; the first private key is decrypted
+// with keyPassword when encrypted. tls.X509KeyPair then rejects a key that
+// does not match the leaf.
+func loadPEM(data []byte, keyPassword string) (*tls.Certificate, error) {
+	var chain, key []byte
+	for rest := data; ; {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
 		}
-		privateKey, err = pkcs8.ParsePKCS8PrivateKey(keyBlock.Bytes, []byte(keyPassword))
+		switch {
+		case block.Type == pemTypeCertificate:
+			chain = append(chain, pem.EncodeToMemory(block)...)
+		case key == nil && strings.HasSuffix(block.Type, "PRIVATE KEY"):
+			k, err := decodeKeyPEM(block, keyPassword)
+			if err != nil {
+				return nil, err
+			}
+			key = k
+		}
+	}
+
+	cert, err := tls.X509KeyPair(chain, key)
+	if err != nil {
+		return nil, err
+	}
+	return &cert, nil
+}
+
+// decodeKeyPEM returns block as plaintext PEM, decrypting encrypted PKCS#8
+// and legacy-encrypted (RFC 1423) keys with keyPassword.
+func decodeKeyPEM(block *pem.Block, keyPassword string) ([]byte, error) {
+	if block.Type == "ENCRYPTED PRIVATE KEY" {
+		if keyPassword == "" {
+			return nil, errors.New("password required for encrypted PKCS#8 key")
+		}
+		key, err := pkcs8.ParsePKCS8PrivateKey(block.Bytes, []byte(keyPassword))
 		if err != nil {
 			return nil, coreerrs.WrapOperation(err, "decrypt PKCS#8 private key")
 		}
-	} else {
-		// Try parsing based on the block type
-		switch keyBlock.Type {
-		case "PRIVATE KEY":
-			// PKCS#8 unencrypted
-			privateKey, err = x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
-		case "RSA PRIVATE KEY":
-			// PKCS#1 RSA
-			privateKey, err = x509.ParsePKCS1PrivateKey(keyBlock.Bytes)
-		case "EC PRIVATE KEY":
-			// SEC1 EC
-			privateKey, err = x509.ParseECPrivateKey(keyBlock.Bytes)
-		default:
-			return nil, fmt.Errorf("unsupported private key type: %s", keyBlock.Type)
-		}
-
+		der, err := x509.MarshalPKCS8PrivateKey(key)
 		if err != nil {
-			return nil, coreerrs.WrapOperation(err, "parse private key")
+			return nil, coreerrs.WrapOperation(err, "encode private key")
 		}
+		return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), nil
 	}
 
-	// Create the certificate
-	cert := &tls.Certificate{
-		Certificate: [][]byte{certBlock.Bytes},
-		PrivateKey:  privateKey,
-	}
-
-	// Parse the leaf certificate
-	cert.Leaf, err = x509.ParseCertificate(certBlock.Bytes)
+	decrypted, encrypted, err := decryptLegacyPEMKey(block, keyPassword)
 	if err != nil {
-		return nil, coreerrs.WrapOperation(err, "parse certificate")
+		return nil, err
 	}
-
-	return cert, nil
+	if encrypted {
+		return decrypted, nil
+	}
+	return pem.EncodeToMemory(block), nil
 }
 
 // LoadFromBytes loads a certificate and private key from raw PEM bytes.
+// certPem may hold the full chain, leaf first; every certificate is kept.
 // Supports multiple private key formats including PKCS#8, PKCS#1 (RSA), SEC1 (EC),
 // and legacy-encrypted PEM formats. The keyPassword parameter is required for
 // encrypted private keys and ignored for unencrypted keys.
@@ -155,21 +154,7 @@ func loadWithDecryption(certPem, keyPem []byte, keyPassword string) (*tls.Certif
 //		log.Fatal(err)
 //	}
 func LoadFromBytes(certPem, keyPem []byte, keyPassword string) (*tls.Certificate, error) {
-	// Try a modern approach first for encrypted keys
-	if keyPassword != "" {
-		cert, err := loadWithDecryption(certPem, keyPem, keyPassword)
-		if err == nil {
-			return cert, nil
-		}
-		// Fall back to legacy method if a modern approach fails
-	}
-
-	combined := make([]byte, 0, len(keyPem)+1+len(certPem))
-	combined = append(combined, keyPem...)
-	combined = append(combined, '\n')
-	combined = append(combined, certPem...)
-
-	return certFromBytes(combined, keyPassword)
+	return loadPEM(bytes.Join([][]byte{certPem, keyPem}, []byte("\n")), keyPassword)
 }
 
 // LoadFromFile loads a certificate and private key from separate files.
@@ -201,23 +186,12 @@ func LoadFromFile(keyPath, certPath, keyPassword string) (*tls.Certificate, erro
 		return nil, err
 	}
 
-	// Try a modern approach first for encrypted keys
-	if keyPassword != "" {
-		cert, err := loadWithDecryption(certPem, keyPem, keyPassword)
-		if err == nil {
-			return cert, nil
-		}
-		// Fall back to legacy method if a modern approach fails
-	}
-
-	keyPem = append(keyPem, '\n')
-	keyPem = append(keyPem, certPem...)
-
-	return certFromBytes(keyPem, keyPassword)
+	return LoadFromBytes(certPem, keyPem, keyPassword)
 }
 
 // LoadFromConcatenatedFile loads a certificate and private key from a single file.
-// The file should contain both the certificate and private key in PEM format.
+// The file should contain both the certificate and private key in PEM format;
+// certificates after the leaf are kept as the chain.
 // The keyPassword parameter is required for encrypted private keys.
 //
 // Example:
@@ -232,40 +206,12 @@ func LoadFromConcatenatedFile(certKeyFilePath, keyPassword string) (*tls.Certifi
 		return nil, err
 	}
 
-	certPem, err := readFile(certKeyFilePath)
+	data, err := readFile(certKeyFilePath)
 	if err != nil {
 		return nil, err
 	}
 
-	// Try to find separate cert and key blocks for a modern approach
-	if keyPassword != "" {
-		var certData, keyData []byte
-		remaining := certPem
-
-		for len(remaining) > 0 {
-			var block *pem.Block
-			block, rest := pem.Decode(remaining)
-			if block == nil {
-				break
-			}
-
-			if block.Type == pemTypeCertificate {
-				certData = pem.EncodeToMemory(block)
-			} else if strings.HasSuffix(block.Type, "PRIVATE KEY") {
-				keyData = pem.EncodeToMemory(block)
-			}
-			remaining = rest
-		}
-
-		if certData != nil && keyData != nil {
-			cert, err := loadWithDecryption(certData, keyData, keyPassword)
-			if err == nil {
-				return cert, nil
-			}
-		}
-	}
-
-	return certFromBytes(certPem, keyPassword)
+	return loadPEM(data, keyPassword)
 }
 
 // DefaultTLSConfig returns a secure default TLS configuration.
@@ -402,7 +348,7 @@ func decryptLegacyPEMKey(block *pem.Block, keyPassword string) (pemKey []byte, e
 		return nil, false, nil
 	}
 	// Deprecated but required for legacy PEM encryption (RFC 1423).
-	// Modern PKCS#8 encryption is handled by loadWithDecryption.
+	// Modern PKCS#8 encryption is handled by decodeKeyPEM.
 	if !x509.IsEncryptedPEMBlock(block) { //nolint:staticcheck // SA1019: required for legacy PEM support
 		return nil, false, nil
 	}
@@ -416,61 +362,6 @@ func decryptLegacyPEMKey(block *pem.Block, keyPassword string) (pemKey []byte, e
 		return nil, false, err
 	}
 	return encoded.Bytes(), true, nil
-}
-
-func certFromBytes(data []byte, keyPassword string) (*tls.Certificate, error) {
-	var (
-		currentBlock     *pem.Block
-		certBlock        []byte
-		certDecodedBlock []byte
-		keyBlock         []byte
-		start            = 0
-	)
-
-	remaining := data
-	for {
-		currentBlock, remaining = pem.Decode(remaining)
-		if currentBlock == nil {
-			break
-		}
-
-		if currentBlock.Type == pemTypeCertificate {
-			certBlock = data[start : len(data)-len(remaining)]
-			certDecodedBlock = currentBlock.Bytes
-			start += len(certBlock)
-			continue
-		}
-
-		if !strings.HasSuffix(currentBlock.Type, "PRIVATE KEY") {
-			continue
-		}
-
-		// Handle encrypted private keys
-		decrypted, encrypted, err := decryptLegacyPEMKey(currentBlock, keyPassword)
-		if err != nil {
-			return nil, err
-		}
-		if encrypted {
-			keyBlock = decrypted
-			start = len(data) - len(remaining)
-			continue
-		}
-
-		keyBlock = data[start : len(data)-len(remaining)]
-		start += len(keyBlock)
-	}
-
-	cert, err := tls.X509KeyPair(certBlock, keyBlock)
-	if err != nil {
-		return nil, err
-	}
-
-	// The documentation for the tls.X509KeyPair indicates that the Leaf certificate is not
-	// retained.
-	if _, err := x509.ParseCertificate(certDecodedBlock); err != nil {
-		return nil, err
-	}
-	return &cert, nil
 }
 
 // BuildCAPool builds a certificate pool from CA certificate files.

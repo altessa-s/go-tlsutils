@@ -10,6 +10,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -146,6 +147,48 @@ func TestLoadFromBytes_Failures(t *testing.T) {
 	other := ecKey(t)
 	_, err = tlsutils.LoadFromBytes(certPEM, pkcs8PEM(t, other), "")
 	require.Error(t, err, "a key that does not match the certificate must not load")
+
+	_, err = tlsutils.LoadFromBytes(certPEM, encryptedPKCS8PEM(t, other, pw), pw)
+	require.Error(t, err, "a decrypted key that does not match the certificate must not load")
+}
+
+func TestLoad_KeepsChain(t *testing.T) {
+	t.Parallel()
+	ca := testhelpers.NewCA(t)
+	leafCert := ca.SignLeaf(t, testhelpers.WithCommonName("chain.test"))
+	chainPEM := bytes.Join([][]byte{
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafCert.Certificate[0]}),
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.Cert.Raw}),
+	}, nil)
+
+	tests := []struct {
+		name     string
+		keyPEM   []byte
+		password string
+	}{
+		{"plain pkcs8", pkcs8PEM(t, leafCert.PrivateKey), ""},
+		{"encrypted pkcs8", encryptedPKCS8PEM(t, leafCert.PrivateKey, pw), pw},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assertChain := func(t *testing.T, cert *tls.Certificate) {
+				t.Helper()
+				require.Len(t, cert.Certificate, 2)
+				require.Equal(t, ca.Cert.Raw, cert.Certificate[1])
+				require.Equal(t, "chain.test", cert.Leaf.Subject.CommonName)
+			}
+
+			cert, err := tlsutils.LoadFromBytes(chainPEM, tc.keyPEM, tc.password)
+			require.NoError(t, err)
+			assertChain(t, cert)
+
+			combined := writeFile(t, "combined.pem", bytes.Join([][]byte{tc.keyPEM, chainPEM}, nil), 0o600)
+			cert, err = tlsutils.LoadFromConcatenatedFile(combined, tc.password)
+			require.NoError(t, err)
+			assertChain(t, cert)
+		})
+	}
 }
 
 func TestLoadFromFile(t *testing.T) {
