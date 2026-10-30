@@ -61,7 +61,7 @@ tidy: ## Run go mod tidy
 	@go mod tidy
 
 .PHONY: generate
-generate: ## Run go generate on all packages
+generate: ## Run go generate on all packages (installs optgen)
 	@cd devtools && go install github.com/altessa-s/go-optgen/cmd/optgen
 	@go generate ./...
 
