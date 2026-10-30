@@ -246,11 +246,9 @@ func TestS3_PollSameETag_NoReload(t *testing.T) {
 func TestS3_SSEC_ParamsPassedToGetObject(t *testing.T) {
 	certPEM, keyPEM, _ := testhelpers.SelfSignedCert(t)
 	client := &sseCapturingClient{
-		mockS3Client: mockS3Client{
-			objects: map[string]*mockObject{
-				"certs/server.crt": {data: certPEM, etag: `"etag1"`},
-				"certs/server.key": {data: keyPEM, etag: `"etag2"`},
-			},
+		objects: map[string]*mockObject{
+			"certs/server.crt": {data: certPEM, etag: `"etag1"`},
+			"certs/server.key": {data: keyPEM, etag: `"etag2"`},
 		},
 	}
 
