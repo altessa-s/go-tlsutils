@@ -12,9 +12,6 @@ import (
 
 func BenchmarkRSAGenerator_Generate(b *testing.B) {
 	gen := tlsvault.NewRSAGenerator()
-	// First call generates, subsequent calls use cache
-	_, _ = gen.Generate()
-	b.ResetTimer()
 	for b.Loop() {
 		_, _ = gen.Generate()
 	}

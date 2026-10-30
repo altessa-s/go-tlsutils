@@ -6,6 +6,7 @@ package tlsvault_test
 
 import (
 	"context"
+	"crypto/rsa"
 	"testing"
 	"time"
 
@@ -102,8 +103,8 @@ func TestRSAGenerator_Generate(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, key)
 
-	// Second call should return same key
+	// Every certificate must get its own key.
 	key2, err := gen.Generate()
 	require.NoError(t, err)
-	require.Equal(t, key, key2)
+	require.False(t, key.(*rsa.PrivateKey).Equal(key2))
 }

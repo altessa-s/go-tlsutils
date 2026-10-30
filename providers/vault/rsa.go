@@ -8,18 +8,15 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"sync"
 )
 
 // DefaultRSAKeyBits is the default RSA key size in bits.
 const DefaultRSAKeyBits = 2048
 
 // RSAGenerator generates RSA private keys for certificates.
-// Keys are generated once and cached for reuse.
+// Every call generates a new key, so each issued or renewed certificate gets
+// its own key and a compromised key does not survive renewal.
 type RSAGenerator struct {
-	key  crypto.PrivateKey
-	err  error
-	o    sync.Once
 	bits int
 }
 
@@ -36,10 +33,6 @@ func NewRSAGenerator() *RSAGenerator {
 }
 
 // Generate creates a new RSA private key.
-// The key is generated only once and cached for subsequent calls.
 func (s *RSAGenerator) Generate() (crypto.PrivateKey, error) {
-	s.o.Do(func() {
-		s.key, s.err = rsa.GenerateKey(rand.Reader, s.bits)
-	})
-	return s.key, s.err
+	return rsa.GenerateKey(rand.Reader, s.bits)
 }
