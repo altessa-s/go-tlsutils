@@ -95,17 +95,22 @@ func TestDialContext(t *testing.T) {
 
 func TestCloneCertificateWithOCSPStaple(t *testing.T) {
 	original := &tls.Certificate{
-		Certificate:                 [][]byte{{0x01, 0x02}},
-		PrivateKey:                  "test-key",
-		SignedCertificateTimestamps: [][]byte{{0x04, 0x05}},
+		Certificate:                  [][]byte{{0x01, 0x02}},
+		PrivateKey:                   "test-key",
+		SignedCertificateTimestamps:  [][]byte{{0x04, 0x05}},
+		SupportedSignatureAlgorithms: []tls.SignatureScheme{tls.ECDSAWithP256AndSHA256},
 	}
 	staple := []byte{0x06, 0x07, 0x08}
 
 	cloned := tlsutils.CloneCertificateWithOCSPStaple(original, staple)
 
-	require.Len(t, cloned.OCSPStaple, len(staple))
-	require.Len(t, cloned.Certificate, len(original.Certificate))
+	require.NotSame(t, original, cloned)
+	require.Equal(t, staple, cloned.OCSPStaple)
+	require.Nil(t, original.OCSPStaple)
+	require.Equal(t, original.Certificate, cloned.Certificate)
 	require.Equal(t, original.PrivateKey, cloned.PrivateKey)
+	require.Equal(t, original.SignedCertificateTimestamps, cloned.SignedCertificateTimestamps)
+	require.Equal(t, original.SupportedSignatureAlgorithms, cloned.SupportedSignatureAlgorithms)
 }
 
 func TestBuildCAPool_SystemOnly(t *testing.T) {

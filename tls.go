@@ -40,16 +40,12 @@ type OCSPStapler interface {
 	RunRefreshAll(ctx context.Context) error
 }
 
-// CloneCertificateWithOCSPStaple creates a copy of the certificate with the provided OCSP staple.
+// CloneCertificateWithOCSPStaple creates a shallow copy of the certificate with the provided OCSP staple.
 // This is useful when updating OCSP responses without modifying the original certificate.
 func CloneCertificateWithOCSPStaple(cert *tls.Certificate, ocspStaple []byte) *tls.Certificate {
-	return &tls.Certificate{
-		Certificate:                 cert.Certificate,
-		PrivateKey:                  cert.PrivateKey,
-		OCSPStaple:                  ocspStaple,
-		SignedCertificateTimestamps: cert.SignedCertificateTimestamps,
-		Leaf:                        cert.Leaf,
-	}
+	clone := *cert
+	clone.OCSPStaple = ocspStaple
+	return &clone
 }
 
 var cipherSuits = []uint16{
