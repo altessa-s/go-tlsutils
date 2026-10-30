@@ -1,23 +1,25 @@
 # Commit Scopes for go-tlsutils
 # Use these scopes in conventional commits: type(scope): description
-# Example: fix(http/client): keep the retry budget per request
+# Example: fix(ocsp): keep the cached staple on a soft failure
 
-# Root-level scopes
-deps                        # Dependency management
-README                      # Root README
-docs                        # Documentation
+# Repository-wide scopes
+deps                            # Dependency management
+README                          # Root README
+docs                            # Documentation
 
 # Packages
-clientip                    # Real client IP extraction
-egressrule                  # Egress rule grammar
-grpc/metadata               # Incoming gRPC metadata getter
-http/client                 # Outbound HTTP client
-http/client/limiters        # Client-side rate limiters
-httpx                       # HTTP helpers and header names
-netipx                      # IP address helpers
-proxydial                   # Forward-proxy dialers
-urlx                        # Base URL parsing and joining
+tlsutils                        # Certificate loading and TLS defaults
+ocsp                            # OCSP stapling, cache and refresh
+providers                       # Certificate provider port
+providers/file                  # PEM files on disk
+providers/letsencrypt           # ACME / autocert
+providers/s3                    # S3-backed PEM
+providers/vault                 # Vault PKI
+providers/internal/staplertest  # Test-only OCSP stapler double
+spiffe                          # SPIFFE Workload API mTLS configs
+internal/testhelpers            # Shared test fixtures
+testdata                        # PEM fixtures
 
 # Tooling
-devtools                    # Development tool dependencies
-ci                          # GitHub Actions workflows and scripts
+devtools                        # Development tool dependencies
+ci                              # GitHub Actions workflows and scripts
