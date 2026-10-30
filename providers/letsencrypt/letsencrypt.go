@@ -160,8 +160,13 @@ func (le *LetsEncrypt) StartHTTPServerWithContext(ctx context.Context, addr stri
 	le.httpSrv = srv
 	le.mu.Unlock()
 
+	// served is closed once Serve returns, so the shutdown watcher below also
+	// exits when Close stops the server before ctx is canceled.
+	served := make(chan struct{})
+
 	// ACME HTTP server
 	go func() {
+		defer close(served)
 		defer func() {
 			le.mu.Lock()
 			if le.httpSrv == srv {
@@ -177,7 +182,11 @@ func (le *LetsEncrypt) StartHTTPServerWithContext(ctx context.Context, addr stri
 
 	// Stop server on context cancellation.
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-served:
+			return
+		}
 
 		// Inherit values from the original context (tracing/log fields), but don't inherit cancellation.
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), le.opts.httpShutdownTimeout)

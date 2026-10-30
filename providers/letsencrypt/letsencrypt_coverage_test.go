@@ -12,7 +12,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -163,4 +165,20 @@ func TestStartHTTPServerWithContext_HonorsPort(t *testing.T) {
 	require.NoError(t, err, "the server listens on the configured port")
 	_ = resp.Body.Close()
 	require.Equal(t, http.StatusTeapot, resp.StatusCode)
+}
+
+// TestClose_StopsShutdownWatcher is serial: it counts process-wide goroutines,
+// so a parallel test with its own running server would skew the count.
+func TestClose_StopsShutdownWatcher(t *testing.T) {
+	le := newProvider(t)
+
+	// A context that is never canceled: only Close may stop the server.
+	require.NoError(t, le.StartHTTPServerWithContext(context.Background(), "127.0.0.1:0", nil))
+	require.NoError(t, le.Close(t.Context()))
+
+	require.Eventually(t, func() bool {
+		buf := make([]byte, 1<<20)
+		stacks := string(buf[:runtime.Stack(buf, true)])
+		return !strings.Contains(stacks, "(*LetsEncrypt).StartHTTPServerWithContext.func")
+	}, 2*time.Second, 10*time.Millisecond, "server goroutines must exit after Close")
 }
