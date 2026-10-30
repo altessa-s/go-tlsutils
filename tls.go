@@ -91,28 +91,40 @@ func readKeyFile(path string) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-// loadPEM builds a certificate from PEM data holding the certificate chain
-// (leaf first) and one private key, in any order. Every CERTIFICATE block is
-// kept so the chain reaches the issuer; the first private key is decrypted
-// with keyPassword when encrypted. tls.X509KeyPair then rejects a key that
-// does not match the leaf.
-func loadPEM(data []byte, keyPassword string) (*tls.Certificate, error) {
-	var chain, key []byte
-	for rest := data; ; {
+// loadPEM builds a certificate from the chain in certData (leaf first) and
+// the first private key in keyData, like tls.X509KeyPair: certificates are
+// taken only from certData and the key only from keyData, so a key bundled
+// into a certificate file never stands in for the key input. Every
+// CERTIFICATE block is kept so the chain reaches the issuer; the key is
+// decrypted with keyPassword when encrypted. tls.X509KeyPair then rejects a
+// key that does not match the leaf.
+func loadPEM(certData, keyData []byte, keyPassword string) (*tls.Certificate, error) {
+	var chain []byte
+	for rest := certData; ; {
 		var block *pem.Block
 		block, rest = pem.Decode(rest)
 		if block == nil {
 			break
 		}
-		switch {
-		case block.Type == pemTypeCertificate:
+		if block.Type == pemTypeCertificate {
 			chain = append(chain, pem.EncodeToMemory(block)...)
-		case key == nil && strings.HasSuffix(block.Type, "PRIVATE KEY"):
+		}
+	}
+
+	var key []byte
+	for rest := keyData; ; {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if strings.HasSuffix(block.Type, "PRIVATE KEY") {
 			k, err := decodeKeyPEM(block, keyPassword)
 			if err != nil {
 				return nil, err
 			}
 			key = k
+			break
 		}
 	}
 
@@ -153,6 +165,8 @@ func decodeKeyPEM(block *pem.Block, keyPassword string) ([]byte, error) {
 
 // LoadFromBytes loads a certificate and private key from raw PEM bytes.
 // certPem may hold the full chain, leaf first; every certificate is kept.
+// Certificates are read only from certPem and the private key only from
+// keyPem.
 // Supports multiple private key formats including PKCS#8, PKCS#1 (RSA), SEC1 (EC),
 // and legacy-encrypted PEM formats. The keyPassword parameter is required for
 // encrypted private keys and ignored for unencrypted keys.
@@ -164,7 +178,7 @@ func decodeKeyPEM(block *pem.Block, keyPassword string) ([]byte, error) {
 //		log.Fatal(err)
 //	}
 func LoadFromBytes(certPem, keyPem []byte, keyPassword string) (*tls.Certificate, error) {
-	return loadPEM(bytes.Join([][]byte{certPem, keyPem}, []byte("\n")), keyPassword)
+	return loadPEM(certPem, keyPem, keyPassword)
 }
 
 // LoadFromFile loads a certificate and private key from separate files.
@@ -209,7 +223,7 @@ func LoadFromConcatenatedFile(certKeyFilePath, keyPassword string) (*tls.Certifi
 		return nil, err
 	}
 
-	return loadPEM(data, keyPassword)
+	return loadPEM(data, data, keyPassword)
 }
 
 // DefaultTLSConfig returns a secure default TLS configuration.

@@ -150,6 +150,24 @@ func TestLoadFromBytes_Failures(t *testing.T) {
 
 	_, err = tlsutils.LoadFromBytes(certPEM, encryptedPKCS8PEM(t, other, pw), pw)
 	require.Error(t, err, "a decrypted key that does not match the certificate must not load")
+
+	bundle := bytes.Join([][]byte{certPEM, pkcs8PEM(t, ec)}, nil)
+	_, err = tlsutils.LoadFromBytes(bundle, nil, "")
+	require.Error(t, err, "a key bundled into the certificate input must not stand in for the key input")
+	_, err = tlsutils.LoadFromBytes(bundle, pkcs8PEM(t, other), "")
+	require.Error(t, err, "the key input is used even when the certificate input bundles a key")
+}
+
+// TestLoadFromFile_KeyOnlyFromKeyFile pins that a world-readable certificate
+// file bundling the key cannot bypass the key file's permission check.
+func TestLoadFromFile_KeyOnlyFromKeyFile(t *testing.T) {
+	t.Parallel()
+	ec := ecKey(t)
+	bundlePath := writeFile(t, "bundle.pem", bytes.Join([][]byte{leaf(t, ec), pkcs8PEM(t, ec)}, nil), 0o644)
+	emptyKey := writeFile(t, "empty.key", nil, 0o600)
+
+	_, err := tlsutils.LoadFromFile(emptyKey, bundlePath, "")
+	require.Error(t, err)
 }
 
 func TestLoad_KeepsChain(t *testing.T) {
