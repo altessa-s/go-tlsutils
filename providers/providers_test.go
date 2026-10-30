@@ -50,20 +50,30 @@ func TestProviders_Close_ClosesReplaced(t *testing.T) {
 	require.NotPanics(t, func() {
 		p.Register(valueProvider{})
 		p.Register(valueProvider{})
-		p.Register(anyFieldProvider{v: []string{"x"}})
-		p.Register(anyFieldProvider{v: []string{"x"}})
 	})
 }
 
-// anyFieldProvider has a comparable type whose values may not be: comparing
-// two of them holding slices panics.
+// anyFieldProvider has a comparable type whose values may not be (comparing
+// two holding slices panics); Close closes its done channel, so a second
+// Close panics.
 type anyFieldProvider struct {
-	v any
+	v    any
+	done chan struct{}
 }
 
 func (anyFieldProvider) Type() ProviderType              { return ProviderTypeVault }
 func (anyFieldProvider) TLSConfig() (*tls.Config, error) { return &tls.Config{}, nil } //nolint:gosec
-func (anyFieldProvider) Close(_ context.Context) error   { return nil }
+func (a anyFieldProvider) Close(_ context.Context) error { close(a.done); return nil }
+
+func TestProviders_NonComparableValueClosedOnce(t *testing.T) {
+	p := &Providers{}
+	v := anyFieldProvider{v: []string{"x"}, done: make(chan struct{})}
+	require.NotPanics(t, func() {
+		p.Register(v)
+		p.Register(v) // the same value again
+		p.Close(t.Context(), nil)
+	})
+}
 
 func TestProviders_Close_ReRegisteredClosesOnce(t *testing.T) {
 	p := &Providers{}

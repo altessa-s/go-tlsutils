@@ -78,7 +78,9 @@ type Providers struct {
 // Register registers a TLS provider with the provider collection.
 // The provider's type is used as the registry key. A provider already
 // registered under the same type is replaced: Get and List no longer return
-// it, and [Providers.Close] still closes it.
+// it, and [Providers.Close] still closes it once. That requires a comparable
+// provider value (a pointer, as every provider in this module is); a replaced
+// non-comparable value is not closed and stays its owner's to close.
 //
 // Example:
 //
@@ -90,7 +92,10 @@ func (p *Providers) Register(provider Provider) {
 	if p.providers == nil {
 		p.providers = make(map[ProviderType]Provider)
 	}
-	if old, ok := p.providers[provider.Type()]; ok && !sameProvider(old, provider) {
+	// Only a provider with a comparable identity is kept: a non-comparable
+	// value cannot be told apart from the same value registered again, and
+	// closing it twice is worse than leaving it to its owner.
+	if old, ok := p.providers[provider.Type()]; ok && isComparable(old) && !sameProvider(old, provider) {
 		p.replaced = append(p.replaced, old)
 	}
 	// A provider registered again is active, not displaced.
@@ -102,8 +107,12 @@ func (p *Providers) Register(provider Provider) {
 // that cannot be compared (a non-comparable type, or an interface field
 // holding a slice or map) are never the same, which avoids a panic on ==.
 func sameProvider(a, b Provider) bool {
-	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
-	return va.Type() == vb.Type() && va.Comparable() && vb.Comparable() && a == b
+	return reflect.TypeOf(a) == reflect.TypeOf(b) && isComparable(a) && isComparable(b) && a == b
+}
+
+// isComparable reports whether p can be compared with == without panicking.
+func isComparable(p Provider) bool {
+	return reflect.ValueOf(p).Comparable()
 }
 
 // Get returns a provider by type.
