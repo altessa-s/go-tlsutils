@@ -154,9 +154,9 @@ func WithSubjectAlternativeNames(v ...string) Option {
 		for i, element := range v {
 			transformed[i] = strings.TrimSpace(element)
 		}
+		deduped := make([]string, 0, len(transformed))
 		{
 			seen := make(map[string]struct{}, len(transformed))
-			deduped := make([]string, 0, len(transformed))
 			for _, item := range transformed {
 				if _, ok := seen[item]; ok {
 					continue
@@ -164,9 +164,8 @@ func WithSubjectAlternativeNames(v ...string) Option {
 				seen[item] = struct{}{}
 				deduped = append(deduped, item)
 			}
-			transformed = deduped
 		}
-		o.subjectAlternativeNames = transformed
+		o.subjectAlternativeNames = deduped
 		return nil
 	}
 }
