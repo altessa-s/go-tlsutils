@@ -18,6 +18,6 @@ paths = [
     # documentation examples.
     '''\.claude/.*''',
     # Synthetic test PKI produced by testdata/generate_certs.sh (CN=Test CA).
-    '''testdata/.*''',
+    '''^testdata/[^/]+\.(crt|key|pem)$''',
 ]
 regexes = []

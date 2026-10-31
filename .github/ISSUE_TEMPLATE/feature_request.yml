@@ -28,20 +28,22 @@ body:
     id: package
     attributes:
       label: Affected Package
-      description: Which top-level package would this feature belong to?
+      description: Which package would this feature belong to?
       options:
-        - auth
-        - config
-        - core
-        - data
-        - domain
-        - infrastructure
-        - observability
-        - proto
-        - security
-        - service
-        - tools
-        - transport
+        - tlsutils
+        - ocsp
+        - providers
+        - providers/file
+        - providers/letsencrypt
+        - providers/s3
+        - providers/vault
+        - providers/internal/certconfig
+        - providers/internal/staplertest
+        - spiffe
+        - internal/testhelpers
+        - testdata
+        - devtools
+        - ci
         - new package
         - not sure
     validations:

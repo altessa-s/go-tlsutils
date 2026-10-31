@@ -17,7 +17,7 @@ body:
       required: true
 
   - type: input
-    id: core-version
+    id: module-version
     attributes:
       label: go-tlsutils Version
       description: The version or commit SHA of go-tlsutils you are using.
@@ -29,20 +29,22 @@ body:
     id: package
     attributes:
       label: Affected Package
-      description: Which top-level package is affected?
+      description: Which package is affected?
       options:
-        - auth
-        - config
-        - core
-        - data
-        - domain
-        - infrastructure
-        - observability
-        - proto
-        - security
-        - service
-        - tools
-        - transport
+        - tlsutils
+        - ocsp
+        - providers
+        - providers/file
+        - providers/letsencrypt
+        - providers/s3
+        - providers/vault
+        - providers/internal/certconfig
+        - providers/internal/staplertest
+        - spiffe
+        - internal/testhelpers
+        - testdata
+        - devtools
+        - ci
         - other
     validations:
       required: true

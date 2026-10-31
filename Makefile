@@ -30,22 +30,26 @@ GOSEC_EXCLUDED_RULES ?= G104,G115,G117,G702,G703,G704,G705
 # - FUZZTIME: per-target budget. `go test -fuzz` accepts exactly one target per
 #   package per invocation, so `make fuzz` walks them and this is the cost of a
 #   single target, not of the whole sweep.
-# - FUZZPKG: restricts the sweep, e.g. FUZZPKG=./providers/anthropic
+# - FUZZPKG: restricts the sweep, e.g. FUZZPKG=./providers/file
 FUZZTIME ?= 30s
 FUZZPKG ?= ./...
+# The recipes read both from the environment, quoted, and never splice them
+# into shell source; fuzz-inputs checks them against narrow allowlists first.
+export FUZZTIME FUZZPKG
 
 .PHONY: all
 all: help
 
 .PHONY: fmt
 fmt: tidy  ## Run go fmt on all go files
-	@cd devtools && go install github.com/daixiang0/gci
-	@gci write \
+	@go -C devtools build -o $(CURDIR)/bin/gci github.com/daixiang0/gci
+	@$(CURDIR)/bin/gci write \
 	    -s standard \
 	    -s default \
 	    -s "prefix(google.golang.org)" \
 	    -s "prefix(golang.org)" \
 	    -s "prefix(github.com/altessa-s/go-atlas-core)" \
+	    -s "prefix(github.com/altessa-s/go-atlas-net)" \
 	    -s "prefix(github.com/altessa-s/go-tlsutils)" \
 	    -s "prefix(github.com/altessa-s)" \
 	    -s blank -s alias \
@@ -61,9 +65,10 @@ tidy: ## Run go mod tidy
 	@go mod tidy
 
 .PHONY: generate
-generate: ## Run go generate on all packages (installs optgen)
-	@cd devtools && go install github.com/altessa-s/go-optgen/cmd/optgen
-	@go generate ./...
+generate: ## Build the pinned optgen and gci into bin/ and run go generate
+	@go -C devtools build -o $(CURDIR)/bin/optgen github.com/altessa-s/go-optgen/cmd/optgen
+	@go -C devtools build -o $(CURDIR)/bin/gci github.com/daixiang0/gci
+	@PATH="$(CURDIR)/bin:$(PATH)" go generate ./...
 
 .PHONY: vet
 vet: ## Run go vet on all packages
@@ -136,25 +141,37 @@ bench-count: ## Run benchmarks multiple times for benchstat (COUNT=5)
 	@go test -bench=. -benchmem -run=^$$ -count=$${COUNT:-5} ./... | tee bench.txt
 	@echo "Results saved to bench.txt (use benchstat bench.txt)"
 
+.PHONY: fuzz-inputs
+fuzz-inputs: # Refuse FUZZTIME and FUZZPKG outside their allowlists
+	@[[ "$$FUZZTIME" =~ ^[0-9]{1,6}(ms|s|m|h|x)$$ ]] || { printf 'invalid FUZZTIME %q (a count of ms, s, m, h or x)\n' "$$FUZZTIME" >&2; exit 2; }
+	@[[ "$$FUZZPKG" =~ ^\./[A-Za-z0-9_./-]*$$ ]] || { printf 'invalid FUZZPKG %q (one ./ package pattern)\n' "$$FUZZPKG" >&2; exit 2; }
+
 .PHONY: fuzz-list
-fuzz-list: ## List every fuzz target (package and name)
-	@for pkg in $$(go list $(FUZZPKG)); do \
-	  for t in $$(go test -list '^Fuzz' $$pkg 2>/dev/null | grep '^Fuzz' || true); do \
+fuzz-list: fuzz-inputs ## List every fuzz target (package and name)
+	@pkgs=$$(go list "$$FUZZPKG") || exit 1; \
+	for pkg in $$pkgs; do \
+	  list=$$(go test -list '^Fuzz' "$$pkg") || exit 1; \
+	  for t in $$(printf '%s\n' "$$list" | grep '^Fuzz' || true); do \
 	    printf '%s\t%s\n' "$${pkg#$(MODULE)/}" "$$t"; \
 	  done; \
 	done
 
 .PHONY: fuzz-seed
-fuzz-seed: ## Run every fuzz target over its seed corpus only (no mutation, fast)
-	@go test -run '^Fuzz' $(FUZZPKG)
+fuzz-seed: fuzz-inputs ## Run every fuzz target over its seed corpus only (no mutation, fast)
+	@go test -run '^Fuzz' "$$FUZZPKG"
 
 .PHONY: fuzz
-fuzz: ## Fuzz every target for FUZZTIME each (FUZZTIME=30s FUZZPKG=./...)
-	@failed=""; \
-	for pkg in $$(go list $(FUZZPKG)); do \
-	  for t in $$(go test -list '^Fuzz' $$pkg 2>/dev/null | grep '^Fuzz' || true); do \
-	    printf '\033[36m==> %s %s (%s)\033[0m\n' "$${pkg#$(MODULE)/}" "$$t" "$(FUZZTIME)"; \
-	    go test -run '^$$' -fuzz "^$$t$$" -fuzztime $(FUZZTIME) $$pkg || failed="$$failed $${pkg#$(MODULE)/}:$$t"; \
+fuzz: fuzz-inputs ## Fuzz every target for FUZZTIME each (FUZZTIME=30s FUZZPKG=./...)
+	@pkgs=$$(go list "$$FUZZPKG") || { printf '\033[31mcannot list the packages %s\033[0m\n' "$$FUZZPKG"; exit 1; }; \
+	failed=""; \
+	for pkg in $$pkgs; do \
+	  if ! list=$$(go test -list '^Fuzz' "$$pkg"); then \
+	    failed="$$failed $${pkg#$(MODULE)/}:(target discovery)"; \
+	    continue; \
+	  fi; \
+	  for t in $$(printf '%s\n' "$$list" | grep '^Fuzz' || true); do \
+	    printf '\033[36m==> %s %s (%s)\033[0m\n' "$${pkg#$(MODULE)/}" "$$t" "$$FUZZTIME"; \
+	    go test -run '^$$' -fuzz "^$$t$$" -fuzztime "$$FUZZTIME" "$$pkg" || failed="$$failed $${pkg#$(MODULE)/}:$$t"; \
 	  done; \
 	done; \
 	if [ -n "$$failed" ]; then \
@@ -163,17 +180,38 @@ fuzz: ## Fuzz every target for FUZZTIME each (FUZZTIME=30s FUZZPKG=./...)
 	  exit 1; \
 	fi
 
+# dupl-scan drops the ignored files before dupl sees them (filtering its
+# output instead would hide a clone group whose printed pairs all involve an
+# ignored file), then scans the rest. Listing the files or scanning them
+# failing fails the recipe (exit 2); dupl reports a file it cannot read or
+# parse on stderr and still exits 0, so any diagnostic is a failed scan too.
+# A filter keeping no file (grep status 1) is a clean result, only grep
+# statuses above 1 are errors.
+define dupl-scan
+files="$$(find "$(DUPL_PATH)" -type f -name '*.go')" || { echo "cannot list the Go files of $(DUPL_PATH)" >&2; exit 2; }; \
+kept="$$(printf '%s\n' "$$files" | grep -Ev "$(DUPL_IGNORE_REGEX)")"; status=$$?; \
+if [ "$$status" -gt 1 ]; then echo "dupl file filter failed" >&2; exit 2; fi; \
+out=""; \
+if [ -n "$$kept" ]; then \
+  diag="$$(mktemp)" || exit 2; \
+  out="$$(printf '%s\n' "$$kept" | dupl -files -t "$(DUPL_THRESHOLD)" -plumbing 2>"$$diag")" || { cat "$$diag" >&2; rm -f "$$diag"; echo "dupl failed" >&2; exit 2; }; \
+  if [ -s "$$diag" ]; then cat "$$diag" >&2; rm -f "$$diag"; echo "dupl could not scan every file" >&2; exit 2; fi; \
+  rm -f "$$diag"; \
+fi
+endef
+
 .PHONY: dupl
 dupl: ## Run dupl (ignoring generated files)
 	@cd devtools && go install github.com/mibk/dupl
-	@dupl -t $(DUPL_THRESHOLD) -plumbing $(DUPL_PATH) | grep -Ev "$(DUPL_IGNORE_REGEX)" || true
+	@$(dupl-scan); \
+	if [ -n "$$out" ]; then printf '%s\n' "$$out"; fi
 
 .PHONY: dupl-check
 dupl-check: ## Fail if dupl finds duplicates (ignoring generated files)
 	@cd devtools && go install github.com/mibk/dupl
-	@out="$$(dupl -t $(DUPL_THRESHOLD) -plumbing $(DUPL_PATH) | grep -Ev "$(DUPL_IGNORE_REGEX)" || true)"; \
+	@$(dupl-scan); \
 	if [ -n "$$out" ]; then \
-		echo "$$out"; \
+		printf '%s\n' "$$out"; \
 		exit 1; \
 	fi
 

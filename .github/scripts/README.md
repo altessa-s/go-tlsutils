@@ -1,64 +1,48 @@
-# GitHub Actions Scripts
+# GitHub Actions scripts
 
-Scripts used in GitHub Actions workflows for automated validation and checks.
+## Commit messages
 
-## validate-commits.sh
+`validate-commit-message.sh` reads a complete message from stdin. The local `commit-msg` hook and CI use this same validator. It checks
+Conventional Commits (`type[(scope)][!]: description`), types, lowercase descriptions and scopes from [`commit_scopes.txt`](../../commit_scopes.txt).
+Only the scope lines of that file count; comment and blank lines name no scope. The `root` scope is forbidden; omit the scope for repository-wide
+changes. Breaking changes may use `!` before the colon.
 
-Validates commit messages against [Conventional Commits](https://www.conventionalcommits.org/) format and checks scopes against
-[`commit_scopes.txt`](../../commit_scopes.txt).
+Messages must describe the concrete change without filler, test results, coverage figures or validation summaries. Agent attribution, generation
+signatures and agent co-author trailers are forbidden. The validator rejects common report headings and attribution patterns, matching agent names
+as whole words only; reviewers check meaning and concision. Human co-author trailers and `BREAKING CHANGE:` explanations remain allowed.
 
-### Features
+`validate-commits.sh` validates the complete message of every commit in a range. All failures fail CI. The only exemption is the subject of a
+merge git generates itself (`Merge branch|tag|remote-tracking branch '…'`, `Merge pull request #N from …`), as git flow merges releases and
+hotfixes; its body is checked like any other. Automated and revert commits use a conventional subject: Dependabot writes `build(deps): bump …`
+(see [`dependabot.yml`](../dependabot.yml)), which the `deps` scope covers, so it needs no exemption. PR titles use the same validator.
 
-- ✅ Validates Conventional Commits format: `type[(scope)]: description` (the scope is optional)
-- ✅ Checks commit types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `ci`, `perf`, `build`
-- ✅ Validates scopes, when present, against `commit_scopes.txt`
-- ✅ Skips merge, revert, and auto-merge commits, and automated `build(deps)` / `chore(deps)` commits (dependabot)
-- ✅ Works for both PR and push events
-- ✅ Provides detailed error messages and examples
+## Usage
 
-### Usage
+```sh
+# Enable the local hook.
+git config core.hooksPath .githooks
 
-**In GitHub Actions:**
-```yaml
-- name: Validate commits
-  run: .github/scripts/validate-commits.sh
+# Exercise validation rules and the local hook without creating commits.
+bash .github/scripts/test-commit-validation.sh
+
+# Validate one message.
+bash .github/scripts/validate-commit-message.sh < /tmp/commit-message
+
+# Validate a specific range.
+bash .github/scripts/validate-commits.sh origin/develop..HEAD
 ```
 
-**Locally:**
-```bash
-# Check local commits not in origin/develop
-.github/scripts/validate-commits.sh
+Without a range, local runs compare against the merge base with `origin/develop`. CI supplies `BASE_SHA` and `HEAD_SHA` for the event. A new branch
+push without a base checks all commits reachable from the head. Missing references and invalid messages fail the check; history is never fetched
+implicitly or replaced with a shorter range.
 
-# Simulate GitHub Actions environment
-GITHUB_EVENT_NAME=push .github/scripts/validate-commits.sh
+## Examples
+
+```text
+fix(ocsp): keep the cached staple on a soft failure
+feat(providers/file): reload certificates on rename
+build(deps): bump golang.org/x/sys from 0.48.0 to 0.49.0
+build: pin the options generator
 ```
 
-### Examples
-
-**Valid commit messages:**
-```
-feat(ocsp): add a hard failure mode
-fix(providers/file): reload the key pair after a rename
-docs: update installation instructions
-test(spiffe): cover SVID rotation
-chore(deps): update dependencies to latest versions
-```
-
-**Invalid commit messages:**
-```
-Add new feature                    # Missing type
-feat(invalid): add feature         # Invalid scope (not in commit_scopes.txt)
-Feat(ocsp): add feature           # Type should be lowercase
-feat(ocsp): Add feature           # Description should start lowercase
-```
-
-### Configuration
-
-The script uses [`commit_scopes.txt`](../../commit_scopes.txt) as the source of truth for valid scopes. Update that file to add or modify allowed
-scopes.
-
-### Exit Codes
-
-- `0`: All commits are valid
-- `1`: Invalid commits found on a `pull_request` event, or when a single commit was checked
-- `0`: Invalid commits found among several commits outside a `pull_request` event (warning mode for legacy commits on push)
+Exit status is zero only when every message is valid (or the selected range is empty).
