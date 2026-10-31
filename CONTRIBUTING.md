@@ -138,7 +138,9 @@ in each module, so `make lint`, `make test-all` and the rest cover all of them; 
 
 Releases tag each changed module separately, root first: tag the root (`vX.Y.Z`), then set each sub-module's `require` of the root to that version,
 commit, and tag the sub-module (`providers/s3/vX.Y.Z`, `providers/vault/vX.Y.Z`, `spiffe/vX.Y.Z`). Consumers ignore `replace`, so a sub-module
-release must never require the placeholder root version.
+release must never require the placeholder root version. In the same commit, raise the root (and provider) requirements of the test-only
+`integration` and `integration/docker` modules to the released versions: left on the placeholder, minimal version selection picks the tagged
+release against their placeholder `go.mod`, and `make golangci` fails asking for `go mod tidy`. They are not tagged.
 
 ## Makefile Targets
 
@@ -148,14 +150,14 @@ release must never require the placeholder root version.
 | `make lint` | Tidy, format and run golangci-lint with the repo config (`.golangci.yml`) in every module |
 | `make golangci` | Run golangci-lint in every module without rewriting files (as CI does) |
 | `make vet` | Run go vet and the go fix modernizer check in every module |
-| `make build` | Build every module (honors `GOOS`/`GOARCH`) |
+| `make build` | Build all packages in every module (honors `GOOS`/`GOARCH`) |
 | `make test` | Run all tests |
 | `make test-verbose` | Run tests with verbose output |
 | `make test-race` | Run tests with race detector |
 | `make test-shuffle` | Run tests with randomized order |
 | `make test-coverage` | Run tests with coverage report |
 | `make test-all` | Run tests with race, shuffle, and coverage |
-| `make coverage` | Run tests with race and shuffle, merging every module's profile into `coverage.out` |
+| `make coverage` | Run tests with race and shuffle in every module, writing the profile to `coverage.out` |
 | `make coverage-total` | Print the total statement coverage of `coverage.out` |
 | `make test-coverage-func` | Per-package coverage breakdown |
 | `make test-integration` | Run unit and integration tests (`-tags integration`) with race detector and shuffle |

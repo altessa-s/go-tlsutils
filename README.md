@@ -51,21 +51,40 @@ Each module is tagged separately (`v0.x.y` for the root, `providers/s3/v0.x.y`, 
 
 ## Functions
 
-| Function                           | Description                              |
-|------------------------------------|------------------------------------------|
-| `LoadFromFile`                     | Load cert + key from separate files      |
-| `LoadFromConcatenatedFile`         | Load cert + key from a single PEM file   |
-| `LoadFromBytes`                    | Load cert + key from PEM bytes           |
-| `ApplyMinTLSVersion`               | Apply a YAML `minVersion` (`1.2`/`1.3`) to a server `tls.Config`; TLS 1.3 clears the 1.2 cipher list |
-| `ResolveMinTLSVersion`             | Parse a `minVersion` string; `ok=false` for unknown input |
-| `DefaultTLSConfig`                 | Secure TLS 1.2+ server configuration     |
-| `DefaultTLSConfigStrict`           | TLS 1.3-only server configuration        |
-| `DefaultClientTLSConfig`           | Secure TLS 1.2+ client configuration     |
-| `DefaultClientTLSConfigStrict`     | TLS 1.3-only client configuration        |
-| `ClientTLSConfig`                  | Strict client mTLS config presenting a cert from a provider |
-| `DialContext`                      | Dial a peer over mutual TLS using a client-cert provider |
-| `BuildCAPool`                      | Build certificate pool from CA files     |
-| `CloneCertificateWithOCSPStaple`   | Attach OCSP staple to certificate        |
+| Function                         | Description                                                                                          |
+|----------------------------------|------------------------------------------------------------------------------------------------------|
+| `LoadFromFile`                   | Load cert + key from separate files                                                                  |
+| `LoadFromConcatenatedFile`       | Load cert + key from a single PEM file                                                               |
+| `LoadFromBytes`                  | Load cert + key from PEM bytes                                                                       |
+| `ParsePrivateKeyPEM`             | Parse a standalone private signing key                                                               |
+| `ApplyMinTLSVersion`             | Apply a YAML `minVersion` (`1.2`/`1.3`) to a server `tls.Config`; TLS 1.3 clears the 1.2 cipher list |
+| `ResolveMinTLSVersion`           | Parse a `minVersion` string; `ok=false` for unknown input                                            |
+| `DefaultTLSConfig`               | Secure TLS 1.2+ server configuration                                                                 |
+| `DefaultTLSConfigStrict`         | TLS 1.3-only server configuration                                                                    |
+| `DefaultClientTLSConfig`         | Secure TLS 1.2+ client configuration                                                                 |
+| `DefaultClientTLSConfigStrict`   | TLS 1.3-only client configuration                                                                    |
+| `ClientTLSConfig`                | Strict client mTLS config presenting a cert from a provider                                          |
+| `DialContext`                    | Dial a peer over mutual TLS using a client-cert provider                                             |
+| `BuildCAPool`                    | Build certificate pool from CA files                                                                 |
+| `CloneCertificateWithOCSPStaple` | Attach OCSP staple to certificate                                                                    |
+
+Behaviour change: `LoadFromBytes`, `LoadFromFile`, `LoadFromConcatenatedFile`, and `ParsePrivateKeyPEM` now restrict encrypted PKCS#8
+keys to the PBKDF2 and scrypt KDF allowlist. PBKDF2 allows 1 to 10,000,000 iterations; scrypt allows up to 1 GiB of memory (`128*N*r`).
+Scrypt requires power-of-two `N` from 2 through 1,048,576, `r` from 1 through 32, `p` from 1 through 16,
+and `N*r*p <= 8,388,608` to bound CPU work. Unknown KDFs and excessive costs return `ErrInvalidPrivateKey` before decryption;
+keys previously accepted without these bounds may now be rejected.
+
+## Standalone signing keys
+
+`ParsePrivateKeyPEM(keyPEM, password)` returns a `crypto.Signer` using the TLS loader's shared parsing path.
+It accepts PKCS#8 (RSA, ECDSA, Ed25519), PKCS#1 (RSA), SEC1 (ECDSA), encrypted PKCS#8 and legacy encrypted PEM.
+Use an empty password for unencrypted keys; a supplied password is ignored for those keys.
+Certificates and other non-key blocks are skipped. The first private key wins; an invalid first key fails even if a later key is valid.
+
+Failures are `*PrivateKeyError` values. Use `errors.Is` with `ErrInvalidPrivateKey`, `ErrPasswordRequired`, or `ErrIncorrectPassword`.
+Incorrect-password detection follows the underlying decoders: unauthenticated encryption cannot reliably distinguish wrong passwords
+from corrupted ciphertext. Decrypted data that cannot be parsed returns `ErrIncorrectPassword` for both encryption formats.
+Error messages contain neither passwords nor key material.
 
 ## Design principles
 
