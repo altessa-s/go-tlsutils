@@ -34,7 +34,7 @@ type countingResponder struct {
 	nextUpdate atomic.Int64 // offset from now, nanoseconds
 }
 
-func newCountingResponder(t *testing.T, ca *testhelpers.CA, nextUpdate time.Duration) *countingResponder {
+func newCountingResponder(t testing.TB, ca *testhelpers.CA, nextUpdate time.Duration) *countingResponder {
 	t.Helper()
 	r := &countingResponder{}
 	r.status.Store(int32(xocsp.Good))
@@ -76,7 +76,7 @@ func newCountingResponder(t *testing.T, ca *testhelpers.CA, nextUpdate time.Dura
 	return r
 }
 
-func chainWith(t *testing.T, ca *testhelpers.CA, urls ...string) *tls.Certificate {
+func chainWith(t testing.TB, ca *testhelpers.CA, urls ...string) *tls.Certificate {
 	t.Helper()
 	leaf := ca.SignLeaf(t, testhelpers.WithOCSPServers(urls...))
 	leaf.Certificate = append(leaf.Certificate, ca.Cert.Raw)
