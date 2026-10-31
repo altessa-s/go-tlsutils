@@ -33,10 +33,8 @@ jobs:
       - name: Compare benchmarks against the base branch
         env:
           BASE_REF: ${{ github.base_ref }}
-          # Shared runners are noisy: only a significant increase above the
-          # threshold fails, and benchstat needs at least 6 samples.
-          BENCH_THRESHOLD: "20"
-          BENCH_COUNT: "8"
+          # Shared runners are noisy: only a significant increase above
+          # BENCH_THRESHOLD fails. The script's header documents its defaults.
           BENCH_REPORT: benchstat.txt
         run: bash .github/scripts/bench-regression.sh "origin/${BASE_REF}"
 

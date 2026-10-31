@@ -42,6 +42,8 @@ body:
         - providers/internal/staplertest
         - spiffe
         - internal/testhelpers
+        - integration
+        - integration/docker
         - testdata
         - devtools
         - ci

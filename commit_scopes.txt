@@ -21,8 +21,8 @@ providers/internal/certconfig    # Shared reload steps of the file and S3 provid
 providers/internal/staplertest   # Test-only OCSP stapler double
 spiffe                           # SPIFFE Workload API mTLS configs
 internal/testhelpers             # Shared test fixtures
-integration                      # In-process end-to-end tests (-tags integration)
-integration/docker               # Docker-backed integration tests (nested module)
+integration                      # In-process end-to-end integration tests
+integration/docker               # Docker-backed integration tests, nested module
 testdata                         # PEM fixtures
 
 # Tooling

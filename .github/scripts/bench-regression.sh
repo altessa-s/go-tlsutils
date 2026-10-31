@@ -29,16 +29,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# run_benchmarks DIR OUT runs every benchmark of the tree at DIR and writes the
+# lines benchstat reads to OUT. A failing run prints its output and fails; a
+# tree without benchmarks yields an empty OUT.
 run_benchmarks() {
-    go -C "$1" test -run='^$' -bench=. -benchmem -count="$count" -benchtime="$benchtime" ./... |
-        grep -E '^(goos|goarch|pkg|cpu|Benchmark)'
+    if ! go -C "$1" test -run='^$' -bench=. -benchmem -count="$count" -benchtime="$benchtime" ./... >"$2.raw" 2>&1; then
+        cat "$2.raw" >&2
+        return 1
+    fi
+    grep -E '^(goos|goarch|pkg|cpu|Benchmark)' "$2.raw" >"$2" || [[ $? -eq 1 ]]
 }
 
 git -C "$repo_dir" worktree add --detach "$work/base" "$base_ref" >/dev/null
 echo "Running benchmarks on $base_ref ..."
-run_benchmarks "$work/base" >"$work/base.txt"
+run_benchmarks "$work/base" "$work/base.txt"
 echo "Running benchmarks on HEAD ..."
-run_benchmarks "$repo_dir" >"$work/head.txt"
+run_benchmarks "$repo_dir" "$work/head.txt"
 
 go -C "$repo_dir/devtools" build -o "$work/benchstat" golang.org/x/perf/cmd/benchstat
 "$work/benchstat" base="$work/base.txt" head="$work/head.txt" | tee "$work/report.txt"
