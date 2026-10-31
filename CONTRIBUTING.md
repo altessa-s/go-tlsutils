@@ -150,14 +150,14 @@ release against their placeholder `go.mod`, and `make golangci` fails asking for
 | `make lint` | Tidy, format and run golangci-lint with the repo config (`.golangci.yml`) in every module |
 | `make golangci` | Run golangci-lint in every module without rewriting files (as CI does) |
 | `make vet` | Run go vet and the go fix modernizer check in every module |
-| `make build` | Build every module (honors `GOOS`/`GOARCH`) |
+| `make build` | Build all packages in every module (honors `GOOS`/`GOARCH`) |
 | `make test` | Run all tests |
 | `make test-verbose` | Run tests with verbose output |
 | `make test-race` | Run tests with race detector |
 | `make test-shuffle` | Run tests with randomized order |
 | `make test-coverage` | Run tests with coverage report |
 | `make test-all` | Run tests with race, shuffle, and coverage |
-| `make coverage` | Run tests with race and shuffle, merging every module's profile into `coverage.out` |
+| `make coverage` | Run tests with race and shuffle in every module, writing the profile to `coverage.out` |
 | `make coverage-total` | Print the total statement coverage of `coverage.out` |
 | `make test-coverage-func` | Per-package coverage breakdown |
 | `make test-integration` | Run unit and integration tests (`-tags integration`) with race detector and shuffle |

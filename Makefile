@@ -6,7 +6,7 @@ MAKEFLAGS      			+= --warn-undefined-variables
 MAKEFLAGS      			+= --no-builtin-rules
 CHANGELOG_NEXT_VERSION 	?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 MODULE         			:= github.com/altessa-s/go-tlsutils
-# Directories holding a go.mod, root first. Every Go target runs in each one:
+# Directories holding a go.mod, root first. Every Go target runs in each one.
 # providers/s3, providers/vault and spiffe are separate modules so their SDKs
 # stay out of the root module's requirements.
 MODULES        			:= . providers/s3 providers/vault spiffe integration integration/docker
@@ -85,12 +85,12 @@ generate: ## Build the pinned optgen and gci into bin/ and run go generate in ev
 	@for m in $(MODULES); do (cd $$m && PATH="$(CURDIR)/bin:$(PATH)" go generate ./...) || exit 1; done
 
 .PHONY: vet
-vet: ## Run go vet and fail when a go fix modernizer would rewrite code, in every module (as CI does)
+vet: ## Run go vet and fail when a go fix modernizer would rewrite code in every module (as CI does)
 	@for m in $(MODULES); do (cd $$m && go vet ./...) || exit 1; done
 	@for m in $(MODULES); do (cd $$m && go fix -diff ./...) || { echo "go fix -diff is not empty in $$m: run go fix ./..."; exit 1; }; done
 
 .PHONY: build
-build: ## Build every module (honors GOOS/GOARCH)
+build: ## Build all packages in every module (honors GOOS/GOARCH)
 	@for m in $(MODULES); do (cd $$m && go build ./...) || exit 1; done
 
 .PHONY: test
@@ -137,16 +137,16 @@ test-coverage-func: ## Run tests and show formatted per-package coverage
 	  }'
 
 .PHONY: coverage
-coverage: ## Run tests with race detector and shuffle in every module, merging the profiles into coverage.out
+coverage: ## Run tests with race detector and shuffle in every module, writing the profile to coverage.out
 	@echo "mode: atomic" > coverage.out
 	@for m in $(MODULES); do \
 	  (cd $$m && go test -race -shuffle=on -covermode=atomic -coverprofile="$(CURDIR)/coverage.part" ./...) || { rm -f coverage.part; exit 1; }; \
 	  if [ -f coverage.part ]; then tail -n +2 coverage.part >> coverage.out; rm -f coverage.part; fi; \
 	done
 
-# go tool cover cannot resolve packages of the other modules from the root, so
-# the total is computed from the profile: covered statements over all
-# statements, printed in go tool cover's "total:" format.
+# go tool cover cannot resolve packages of other modules from the root, so the
+# total is computed from the profile: covered statements over all statements,
+# printed in go tool cover's "total:" format.
 .PHONY: coverage-total
 coverage-total: ## Print the total statement coverage of coverage.out
 	@awk 'NR > 1 { stmts += $$2; if ($$3 > 0) covered += $$2 } \
@@ -215,8 +215,9 @@ fuzz-list: fuzz-inputs ## List every fuzz target (package and name)
 	@$(fuzz-dirs); \
 	for d in $$fdirs; do \
 	  list=$$(cd "$$d" && go test -list '^Fuzz' .) || exit 1; \
+	  rel="$${d#$(CURDIR)}"; rel="$${rel#/}"; rel="$${rel:-.}"; \
 	  for t in $$(printf '%s\n' "$$list" | grep '^Fuzz' || true); do \
-	    printf '%s\t%s\n' "$${d#$(CURDIR)/}" "$$t"; \
+	    printf '%s\t%s\n' "$$rel" "$$t"; \
 	  done; \
 	done
 
@@ -230,7 +231,7 @@ fuzz: fuzz-inputs ## Fuzz every target for FUZZTIME each (FUZZTIME=30s FUZZPKG=.
 	@$(fuzz-dirs); \
 	failed=""; \
 	for d in $$fdirs; do \
-	  rel="$${d#$(CURDIR)/}"; \
+	  rel="$${d#$(CURDIR)}"; rel="$${rel#/}"; rel="$${rel:-.}"; \
 	  if ! list=$$(cd "$$d" && go test -list '^Fuzz' .); then \
 	    failed="$$failed $$rel:(target discovery)"; \
 	    continue; \

@@ -32,7 +32,7 @@ jobs:
         # make golangci builds the linter from devtools/go.mod (its module
         # graph pins a golang.org/x/tools that reads Go 1.27 export data; the
         # golangci-lint-action goinstall mode fails typecheck) and runs it in
-        # every module listed in the Makefile's MODULES.
+        # each directory of the Makefile's MODULES.
         run: make golangci
 
       - name: Run go vet and check go fix modernizers
@@ -57,7 +57,8 @@ jobs:
           cache-dependency-path: "**/go.sum"
 
       - name: Run tests
-        # Runs every module and merges their profiles into coverage.out.
+        # Runs each directory of the Makefile's MODULES and merges the
+        # profiles into coverage.out.
         run: make coverage
 
       - name: Enforce coverage floor
