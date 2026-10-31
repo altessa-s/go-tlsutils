@@ -1,6 +1,6 @@
 # devtools
 
-Module `github.com/altessa-s/go-tlsutils/devtools` pins the development tools of go-tlsutils separately, so their dependencies stay out of the library's
+Module `github.com/altessa-s/go-tlsutils/devtools` pins the development tools of go-tlsutils separately, so their dependencies stay out of the main
 `go.mod`. No code imports it. The Makefile builds or installs each tool from here before running it.
 
 ## Pinned tools
