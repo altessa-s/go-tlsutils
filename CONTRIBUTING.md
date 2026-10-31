@@ -138,7 +138,9 @@ in each module, so `make lint`, `make test-all` and the rest cover all of them; 
 
 Releases tag each changed module separately, root first: tag the root (`vX.Y.Z`), then set each sub-module's `require` of the root to that version,
 commit, and tag the sub-module (`providers/s3/vX.Y.Z`, `providers/vault/vX.Y.Z`, `spiffe/vX.Y.Z`). Consumers ignore `replace`, so a sub-module
-release must never require the placeholder root version.
+release must never require the placeholder root version. In the same commit, raise the root (and provider) requirements of the test-only
+`integration` and `integration/docker` modules to the released versions: left on the placeholder, minimal version selection picks the tagged
+release against their placeholder `go.mod`, and `make golangci` fails asking for `go mod tidy`. They are not tagged.
 
 ## Makefile Targets
 
