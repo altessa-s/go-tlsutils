@@ -167,6 +167,124 @@ func TestStartHTTPServerWithContext_HonorsPort(t *testing.T) {
 	require.Equal(t, http.StatusTeapot, resp.StatusCode)
 }
 
+// TestStartHTTPServer_Wrapper pins that StartHTTPServer delegates to
+// StartHTTPServerWithContext using context.Background, by observing the same
+// externally visible behavior (the fallback handler being reachable).
+func TestStartHTTPServer_Wrapper(t *testing.T) {
+	t.Parallel()
+	le := newProvider(t)
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := l.Addr().String()
+	require.NoError(t, l.Close())
+
+	fallback := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	require.NoError(t, le.StartHTTPServer(addr, fallback))
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+"/", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusTeapot, resp.StatusCode)
+}
+
+// TestStartHTTPServerWithContext_ListenError pins that a failure to bind the
+// listener (the address is already taken) is wrapped and returned, and does
+// not leave httpSrv set.
+func TestStartHTTPServerWithContext_ListenError(t *testing.T) {
+	t.Parallel()
+	le := newProvider(t)
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+	addr := l.Addr().String()
+
+	require.Error(t, le.StartHTTPServerWithContext(t.Context(), addr, nil))
+
+	// The failed attempt must not have left a server registered: starting on
+	// a free address afterward must succeed.
+	free, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	freeAddr := free.Addr().String()
+	require.NoError(t, free.Close())
+	require.NoError(t, le.StartHTTPServerWithContext(t.Context(), freeAddr, nil))
+}
+
+// TestStartHTTPServerWithContext_ContextCancelAllowsRestart cancels the
+// context without ever calling Close. The shutdown watcher stops the server,
+// and the Serve goroutine's own cleanup must clear httpSrv once Serve
+// returns, letting a new server start without ErrHTTPServerStarted.
+func TestStartHTTPServerWithContext_ContextCancelAllowsRestart(t *testing.T) {
+	t.Parallel()
+	le := newProvider(t)
+	ctx, cancel := context.WithCancel(t.Context())
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := l.Addr().String()
+	require.NoError(t, l.Close())
+
+	require.NoError(t, le.StartHTTPServerWithContext(ctx, addr, nil))
+	cancel()
+
+	require.Eventually(t, func() bool {
+		return le.StartHTTPServerWithContext(t.Context(), addr, nil) == nil
+	}, 2*time.Second, 10*time.Millisecond, "a canceled context must release the already-started guard")
+}
+
+// TestStartHTTPServerWithContext_ShutdownTimeoutForcesClose pins that a
+// shutdown that cannot drain an in-flight request within
+// httpShutdownTimeout falls back to a hard Close instead of hanging forever.
+func TestStartHTTPServerWithContext_ShutdownTimeoutForcesClose(t *testing.T) {
+	t.Parallel()
+	le := newProvider(t, tlsletsencrypt.WithHTTPShutdownTimeout(20*time.Millisecond))
+
+	block := make(chan struct{})
+	t.Cleanup(func() { close(block) })
+	requestStarted := make(chan struct{})
+	fallback := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(requestStarted)
+		<-block
+	})
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := l.Addr().String()
+	require.NoError(t, l.Close())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	require.NoError(t, le.StartHTTPServerWithContext(ctx, addr, fallback))
+
+	// Fire a request that blocks past the shutdown deadline, then cancel the
+	// context so the shutdown watcher cannot gracefully drain it.
+	go func() {
+		req, rErr := http.NewRequest(http.MethodGet, "http://"+addr+"/", nil) //nolint:noctx
+		if rErr != nil {
+			return
+		}
+		resp, doErr := http.DefaultClient.Do(req)
+		if doErr == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(2 * time.Second):
+		require.Fail(t, "timeout waiting for the blocking request to start")
+	}
+	cancel()
+
+	// The hard Close fallback must still let a new server bind afterward.
+	require.Eventually(t, func() bool {
+		return le.StartHTTPServerWithContext(t.Context(), addr, nil) == nil
+	}, 2*time.Second, 10*time.Millisecond, "a timed-out shutdown must still release the port via the hard Close fallback")
+}
+
 // TestClose_StopsShutdownWatcher is serial: it counts process-wide goroutines,
 // so a parallel test with its own running server would skew the count.
 func TestClose_StopsShutdownWatcher(t *testing.T) {
