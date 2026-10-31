@@ -1,5 +1,5 @@
-github.com/altessa-s/go-atlas-core v0.1.0 h1:6RXZ2jSBbLBgwnpW6nWQUQjAAJl81Scvi8oj7e2vPSA=
-github.com/altessa-s/go-atlas-core v0.1.0/go.mod h1:xOKuQewGd1wO3llziO2K6CUUtr3FHGnJHUMRUIOCaHw=
+github.com/altessa-s/go-atlas-core v0.2.0 h1:ldDqdjOtm1rPiByVwhijAFx6Ss4IRKnpZ61dlx0y/T0=
+github.com/altessa-s/go-atlas-core v0.2.0/go.mod h1:xOKuQewGd1wO3llziO2K6CUUtr3FHGnJHUMRUIOCaHw=
 github.com/aws/aws-sdk-go-v2 v1.47.5 h1:5yA+A+BiXbDq1ZLbYwPViwhEGDMdR0MEhL8Jh2LnLS4=
 github.com/aws/aws-sdk-go-v2 v1.47.5/go.mod h1:iNIkogrRvFwm+1OQIUOP2lPBtlXZboOIUWiCa+pHEMw=
 github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.25 h1:MW0Iql1SOTgQPj8mCxrU/eH/K/AIDWi08ItOsXaWRLU=
