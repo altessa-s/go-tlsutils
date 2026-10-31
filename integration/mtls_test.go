@@ -9,7 +9,6 @@ package integration_test
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"io"
 	"net"
 	"testing"
@@ -18,33 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	tlsutils "github.com/altessa-s/go-tlsutils"
-	tlsproviders "github.com/altessa-s/go-tlsutils/providers"
 	tlsfile "github.com/altessa-s/go-tlsutils/providers/file"
 )
-
-var errNoClientCertificate = errors.New("provider config holds no certificate")
-
-// providerClientCert adapts a provider's current TLS config into the client
-// certificate source [tlsutils.ClientTLSConfig] expects. The file provider
-// exposes its certificate only through TLSConfig, so this is the glue a
-// caller writes; the certificate is pulled per handshake.
-type providerClientCert struct {
-	provider tlsproviders.Provider
-}
-
-func (p providerClientCert) GetClientCertificate(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-	cfg, err := p.provider.TLSConfig()
-	if err != nil {
-		return nil, err
-	}
-	if cfg.GetClientCertificate != nil {
-		return cfg.GetClientCertificate(info)
-	}
-	if len(cfg.Certificates) == 0 {
-		return nil, errNoClientCertificate
-	}
-	return &cfg.Certificates[0], nil
-}
 
 // mtlsServer accepts one connection on a loopback listener, requires and
 // verifies a client certificate against clientCAs, and reports the verified
@@ -133,7 +107,7 @@ func TestMutualTLS_FileProviderClientCertificate(t *testing.T) {
 			t.Cleanup(func() { _ = prov.Close(t.Context()) })
 
 			addr, result := mtlsServer(t, serverPKI.issueLeaf(t, ""), serverPKI.root.Pool)
-			clientCfg := tlsutils.ClientTLSConfig(providerClientCert{provider: prov}, serverName)
+			clientCfg := tlsutils.ClientTLSConfig(prov, serverName)
 			clientCfg.RootCAs = serverPKI.root.Pool
 
 			clientErr := dialAndRead(t, addr, clientCfg)
