@@ -10,7 +10,7 @@ replace github.com/altessa-s/go-tlsutils => ../
 
 require (
 	github.com/altessa-s/go-atlas-core v0.2.0
-	github.com/altessa-s/go-tlsutils v0.0.0-00010101000000-000000000000
+	github.com/altessa-s/go-tlsutils v0.1.0
 	github.com/spiffe/go-spiffe/v2 v2.9.0
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/grpc v1.85.0
