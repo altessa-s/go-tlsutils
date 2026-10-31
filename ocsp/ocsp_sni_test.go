@@ -202,6 +202,14 @@ func TestSelectServerCertificate(t *testing.T) {
 		require.Equal(t, rsa.Certificate, got.Certificate)
 	})
 
+	t.Run("name map matches the exact lowercased name", func(t *testing.T) {
+		t.Parallel()
+		names := coremaps.NewImmutableMap(map[string]*tls.Certificate{"api.example.org": &statics[1]})
+		got, err := selectServerCertificate(&tls.ClientHelloInfo{ServerName: "API.Example.ORG"}, nil, statics, names)
+		require.NoError(t, err)
+		require.Equal(t, rsa.Certificate, got.Certificate, "an exact entry must be matched before falling back to a wildcard or capability check")
+	})
+
 	t.Run("no certificates", func(t *testing.T) {
 		t.Parallel()
 		_, err := selectServerCertificate(&tls.ClientHelloInfo{}, nil, nil, nil)
