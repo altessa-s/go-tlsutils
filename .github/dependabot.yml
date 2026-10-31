@@ -6,6 +6,11 @@ updates:
   - package-ecosystem: gomod
     directories:
       - /
+      - /providers/s3
+      - /providers/vault
+      - /spiffe
+      - /integration
+      - /integration/docker
       - /devtools
     schedule:
       interval: weekly
