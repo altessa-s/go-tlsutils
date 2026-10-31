@@ -2,10 +2,19 @@ module github.com/altessa-s/go-tlsutils/integration/docker
 
 go 1.27.0
 
-replace github.com/altessa-s/go-tlsutils => ../..
+toolchain go1.27.3
+
+// Test-only module: build against the modules in this checkout.
+replace (
+	github.com/altessa-s/go-tlsutils => ../..
+	github.com/altessa-s/go-tlsutils/providers/s3 => ../../providers/s3
+	github.com/altessa-s/go-tlsutils/providers/vault => ../../providers/vault
+)
 
 require (
 	github.com/altessa-s/go-tlsutils v0.0.0-00010101000000-000000000000
+	github.com/altessa-s/go-tlsutils/providers/s3 v0.0.0-00010101000000-000000000000
+	github.com/altessa-s/go-tlsutils/providers/vault v0.0.0-00010101000000-000000000000
 	github.com/aws/aws-sdk-go-v2 v1.47.5
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.13
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.6
