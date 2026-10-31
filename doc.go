@@ -5,6 +5,8 @@
 // Package tlsutils provides TLS certificate loading and secure configuration utilities.
 // Supports multiple certificate sources (file, Vault, Let's Encrypt), private key
 // formats (PKCS#8, PKCS#1, SEC1), and enforces modern TLS 1.2+ defaults.
+// ParsePrivateKeyPEM loads standalone signing keys using the same decryption
+// and parsing path as TLS loading, including encrypted PKCS#8 and legacy PEM.
 //
 // Example:
 //

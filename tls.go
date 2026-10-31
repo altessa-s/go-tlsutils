@@ -7,6 +7,10 @@ package tlsutils
 import (
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -26,7 +30,9 @@ import (
 )
 
 const (
-	pemTypeCertificate = "CERTIFICATE"
+	pemTypeCertificate         = "CERTIFICATE"
+	pemTypePrivateKey          = "PRIVATE KEY"
+	pemTypeEncryptedPrivateKey = "ENCRYPTED PRIVATE KEY"
 
 	// maxKeyFilePermissions is the maximum allowed file mode for private key files.
 	// Key files must not be readable by group or others (i.e., at most 0600).
@@ -111,22 +117,15 @@ func loadPEM(certData, keyData []byte, keyPassword string) (*tls.Certificate, er
 		}
 	}
 
-	var key []byte
-	for rest := keyData; ; {
-		var block *pem.Block
-		block, rest = pem.Decode(rest)
-		if block == nil {
-			break
-		}
-		if strings.HasSuffix(block.Type, "PRIVATE KEY") {
-			k, err := decodeKeyPEM(block, keyPassword)
-			if err != nil {
-				return nil, err
-			}
-			key = k
-			break
-		}
+	signer, err := ParsePrivateKeyPEM(keyData, keyPassword)
+	if err != nil {
+		return nil, err
 	}
+	der, err := x509.MarshalPKCS8PrivateKey(signer)
+	if err != nil {
+		return nil, coreerrs.WrapOperation(err, "encode private key")
+	}
+	key := pem.EncodeToMemory(&pem.Block{Type: pemTypePrivateKey, Bytes: der})
 
 	cert, err := tls.X509KeyPair(chain, key)
 	if err != nil {
@@ -135,22 +134,127 @@ func loadPEM(certData, keyData []byte, keyPassword string) (*tls.Certificate, er
 	return &cert, nil
 }
 
+// ErrInvalidPrivateKey indicates missing, malformed, unsupported, or excessively
+// costly private key data. For encrypted keys, a decrypted payload that cannot be
+// parsed instead returns ErrIncorrectPassword: unauthenticated encryption cannot
+// always distinguish a wrong password from a corrupt key.
+var ErrInvalidPrivateKey = errors.New("invalid private key")
+
+// ErrIncorrectPassword indicates a decryption failure identified as an incorrect
+// password. Unauthenticated encryption cannot distinguish all corrupt keys from
+// incorrect passwords. It also indicates an encrypted payload that decrypts but
+// cannot be parsed as a private key.
+var ErrIncorrectPassword = errors.New("incorrect private key password")
+
+// ErrPasswordRequired indicates an encrypted key was supplied without a password.
+var ErrPasswordRequired = errors.New("private key password required")
+
+// PrivateKeyError describes a private key parsing failure. Unwrap exposes its
+// sentinel cause for errors.Is: ErrInvalidPrivateKey, ErrIncorrectPassword, or
+// ErrPasswordRequired. Messages never include key data or passwords.
+type PrivateKeyError struct {
+	Err error
+}
+
+func (e *PrivateKeyError) Error() string {
+	if e.Err == nil {
+		return "parse private key"
+	}
+	return "parse private key: " + e.Err.Error()
+}
+
+// Unwrap returns the parsing failure's cause.
+func (e *PrivateKeyError) Unwrap() error { return e.Err }
+
+// ParsePrivateKeyPEM parses the first private key PEM block as a crypto.Signer.
+// Certificates and other non-key blocks are skipped; missing or invalid keys
+// return a *PrivateKeyError. Supported keys are Ed25519, ECDSA, and RSA in PKCS#8,
+// PKCS#1, or SEC1 format, matching the TLS loading path.
+// Password decrypts encrypted PKCS#8 and legacy encrypted PEM; it is ignored for
+// unencrypted keys. An empty password is for unencrypted keys.
+//
+// Encrypted PKCS#8 keys allow only PBKDF2 (1 to 10,000,000 iterations) and
+// scrypt (128*N*r <= 1 GiB). Scrypt requires power-of-two N from 2 to 1,048,576,
+// r from 1 to 32, p from 1 to 16, and N*r*p <= 8,388,608. Unsupported KDFs or
+// excessive costs return ErrInvalidPrivateKey before decryption. These limits
+// also apply to TLS loading and reject keys previously accepted without bounds.
+func ParsePrivateKeyPEM(pemData []byte, password string) (crypto.Signer, error) {
+	for rest := pemData; ; {
+		block, remaining := pem.Decode(rest)
+		if block == nil {
+			return nil, &PrivateKeyError{Err: ErrInvalidPrivateKey}
+		}
+		rest = remaining
+		if !strings.HasSuffix(block.Type, pemTypePrivateKey) {
+			continue
+		}
+		plaintext, err := decodeKeyPEM(block, password)
+		if err != nil {
+			return nil, &PrivateKeyError{Err: err}
+		}
+		decoded, _ := pem.Decode(plaintext)
+		if decoded == nil {
+			return nil, &PrivateKeyError{Err: ErrInvalidPrivateKey}
+		}
+		// Match crypto/tls's DER format detection, independent of the PEM label.
+		if key, err := x509.ParsePKCS1PrivateKey(decoded.Bytes); err == nil {
+			return key, nil
+		}
+		if key, err := x509.ParsePKCS8PrivateKey(decoded.Bytes); err == nil {
+			switch key := key.(type) {
+			case *rsa.PrivateKey:
+				return key, nil
+			case *ecdsa.PrivateKey:
+				return key, nil
+			case ed25519.PrivateKey:
+				return key, nil
+			default:
+				return nil, &PrivateKeyError{Err: ErrInvalidPrivateKey}
+			}
+		}
+		if key, err := x509.ParseECPrivateKey(decoded.Bytes); err == nil {
+			return key, nil
+		}
+		// Legacy encryption can produce valid padding with the wrong password.
+		// Treat unparseable plaintext consistently with the PKCS#8 decoder.
+		if x509.IsEncryptedPEMBlock(block) { //nolint:staticcheck // SA1019: required for legacy PEM support
+			return nil, &PrivateKeyError{Err: ErrIncorrectPassword}
+		}
+		return nil, &PrivateKeyError{Err: ErrInvalidPrivateKey}
+	}
+}
+
 // decodeKeyPEM returns block as plaintext PEM, decrypting encrypted PKCS#8
 // and legacy-encrypted (RFC 1423) keys with keyPassword.
-func decodeKeyPEM(block *pem.Block, keyPassword string) ([]byte, error) {
-	if block.Type == "ENCRYPTED PRIVATE KEY" {
+func decodeKeyPEM(block *pem.Block, keyPassword string) (plaintext []byte, err error) {
+	// Cipher parameters and KDF costs are validated before decryption. Keep
+	// recovery as a last resort for unexpected dependency panics, without
+	// exposing their payloads.
+	defer func() {
+		if recover() != nil {
+			plaintext, err = nil, ErrInvalidPrivateKey
+		}
+	}()
+	if block.Type == pemTypeEncryptedPrivateKey {
 		if keyPassword == "" {
-			return nil, errors.New("password required for encrypted PKCS#8 key")
+			return nil, ErrPasswordRequired
 		}
-		key, err := pkcs8.ParsePKCS8PrivateKey(block.Bytes, []byte(keyPassword))
-		if err != nil {
-			return nil, coreerrs.WrapOperation(err, "decrypt PKCS#8 private key")
+		if err = validatePrivateKeyKDF(block.Bytes); err != nil {
+			return nil, err
 		}
-		der, err := x509.MarshalPKCS8PrivateKey(key)
-		if err != nil {
-			return nil, coreerrs.WrapOperation(err, "encode private key")
+		key, parseErr := pkcs8.ParsePKCS8PrivateKey(block.Bytes, []byte(keyPassword))
+		if parseErr != nil {
+			// The pinned dependency exposes this condition only as a string.
+			if parseErr.Error() == "pkcs8: incorrect password" {
+				return nil, ErrIncorrectPassword
+			}
+			return nil, ErrInvalidPrivateKey
 		}
-		return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), nil
+		der, marshalErr := x509.MarshalPKCS8PrivateKey(key)
+		if marshalErr != nil {
+			return nil, ErrInvalidPrivateKey
+		}
+		return pem.EncodeToMemory(&pem.Block{Type: pemTypePrivateKey, Bytes: der}), nil
 	}
 
 	decrypted, encrypted, err := decryptLegacyPEMKey(block, keyPassword)
@@ -171,6 +275,8 @@ func decodeKeyPEM(block *pem.Block, keyPassword string) ([]byte, error) {
 // and legacy-encrypted PEM formats. The keyPassword parameter is required for
 // encrypted private keys and ignored for unencrypted keys.
 //
+// Encrypted PKCS#8 keys follow the KDF allowlist and cost limits documented in [ParsePrivateKeyPEM].
+//
 // Example:
 //
 //	cert, err := tlsutils.LoadFromBytes(certPem, keyPem, "password")
@@ -185,6 +291,8 @@ func LoadFromBytes(certPem, keyPem []byte, keyPassword string) (*tls.Certificate
 // Supports multiple private key formats including PKCS#8, PKCS#1 (RSA), SEC1 (EC),
 // and legacy-encrypted PEM formats. The keyPassword parameter is required for
 // encrypted private keys and ignored for unencrypted keys.
+//
+// Encrypted PKCS#8 keys follow the KDF allowlist and cost limits documented in [ParsePrivateKeyPEM].
 //
 // Example:
 //
@@ -210,6 +318,8 @@ func LoadFromFile(keyPath, certPath, keyPassword string) (*tls.Certificate, erro
 // The file should contain both the certificate and private key in PEM format;
 // certificates after the leaf are kept as the chain.
 // The keyPassword parameter is required for encrypted private keys.
+//
+// Encrypted PKCS#8 keys follow the KDF allowlist and cost limits documented in [ParsePrivateKeyPEM].
 //
 // Example:
 //
@@ -352,7 +462,7 @@ func ResolveMinTLSVersion(s string) (uint16, bool) {
 // It returns the re-encoded plaintext PEM and encrypted=true for such a
 // block, and encrypted=false for any other block.
 func decryptLegacyPEMKey(block *pem.Block, keyPassword string) (pemKey []byte, encrypted bool, err error) {
-	if keyPassword == "" || block.Headers == nil {
+	if block.Headers == nil {
 		return nil, false, nil
 	}
 	// Check if the PEM block is encrypted by looking for the DEK-Info header
@@ -364,14 +474,20 @@ func decryptLegacyPEMKey(block *pem.Block, keyPassword string) (pemKey []byte, e
 	if !x509.IsEncryptedPEMBlock(block) { //nolint:staticcheck // SA1019: required for legacy PEM support
 		return nil, false, nil
 	}
+	if keyPassword == "" {
+		return nil, false, ErrPasswordRequired
+	}
 	buf, err := x509.DecryptPEMBlock(block, []byte(keyPassword)) //nolint:staticcheck // SA1019: required for legacy PEM support
 	if err != nil {
-		return nil, false, coreerrs.WrapOperation(err, "decrypt private key")
+		if errors.Is(err, x509.IncorrectPasswordError) { //nolint:staticcheck // SA1019: required for legacy PEM support
+			return nil, false, ErrIncorrectPassword
+		}
+		return nil, false, ErrInvalidPrivateKey
 	}
 
 	var encoded bytes.Buffer
 	if err := pem.Encode(&encoded, &pem.Block{Type: block.Type, Bytes: buf}); err != nil {
-		return nil, false, err
+		return nil, false, ErrInvalidPrivateKey
 	}
 	return encoded.Bytes(), true, nil
 }
