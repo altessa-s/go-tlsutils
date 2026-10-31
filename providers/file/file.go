@@ -30,6 +30,7 @@ type File struct {
 
 	mu        sync.RWMutex
 	tlsConfig *tls.Config
+	cert      *tls.Certificate // loaded with tlsConfig, served as the client certificate
 
 	watcher     *fsnotify.Watcher
 	watcherDone chan struct{}
@@ -146,6 +147,26 @@ func (f *File) TLSConfig() (*tls.Config, error) {
 	return config, nil
 }
 
+// GetClientCertificate returns a copy of the currently loaded certificate for
+// mutual TLS, reflecting the latest reload. It implements the
+// tls.Config.GetClientCertificate callback, so the provider can be passed to
+// [tlsutils.ClientTLSConfig] or [tlsutils.DialContext]. The certificate is not
+// OCSP-stapled: staples are a server-side mechanism.
+//
+// Example:
+//
+//	cfg := tlsutils.ClientTLSConfig(provider, "peer.internal")
+func (f *File) GetClientCertificate(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	if f.cert == nil {
+		return nil, errors.New("TLS certificate not loaded")
+	}
+	cert := *f.cert
+	return &cert, nil
+}
+
 // Close stops the file watcher and releases all resources.
 // The context controls the graceful shutdown timeout.
 // Returns context.DeadlineExceeded if cleanup doesn't complete within the context timeout.
@@ -193,6 +214,7 @@ func (f *File) loadCertificate() error {
 
 	f.mu.Lock()
 	f.tlsConfig = tlsConfig
+	f.cert = cert
 	f.mu.Unlock()
 
 	f.logger.DebugContext(f.ctx, "certificate loaded successfully",
@@ -259,4 +281,7 @@ func (f *File) watchFiles() {
 	}
 }
 
-var _ tlsproviders.Provider = (*File)(nil)
+var (
+	_ tlsproviders.Provider          = (*File)(nil)
+	_ tlsproviders.ClientCertificate = (*File)(nil)
+)
