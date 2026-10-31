@@ -1,5 +1,5 @@
-github.com/altessa-s/go-atlas-core v0.2.0 h1:ldDqdjOtm1rPiByVwhijAFx6Ss4IRKnpZ61dlx0y/T0=
-github.com/altessa-s/go-atlas-core v0.2.0/go.mod h1:xOKuQewGd1wO3llziO2K6CUUtr3FHGnJHUMRUIOCaHw=
+github.com/altessa-s/go-atlas-core v0.3.1 h1:/xSTFoK6pka/x+bJ1mqHHkEFOOhpRN/2gOZY3mZYUIQ=
+github.com/altessa-s/go-atlas-core v0.3.1/go.mod h1:xOKuQewGd1wO3llziO2K6CUUtr3FHGnJHUMRUIOCaHw=
 github.com/fsnotify/fsnotify v1.10.1 h1:b0/UzAf9yR5rhf3RPm9gf3ehBPpf0oZKIjtpKrx59Ho=
 github.com/fsnotify/fsnotify v1.10.1/go.mod h1:TLheqan6HD6GBK6PrDWyDPBaEV8LspOxvPSjC+bVfgo=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=

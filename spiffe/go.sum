@@ -1,7 +1,7 @@
 github.com/Microsoft/go-winio v0.6.4 h1:kJF2pamtYCWXf0xAT8sAkwKC0pMl2HYBrRPHAqyUc+g=
 github.com/Microsoft/go-winio v0.6.4/go.mod h1:1xl5JXG4ze/m74GH6Dc4Mwxfc3VL5siRVQjIAlHH07U=
-github.com/altessa-s/go-atlas-core v0.2.0 h1:ldDqdjOtm1rPiByVwhijAFx6Ss4IRKnpZ61dlx0y/T0=
-github.com/altessa-s/go-atlas-core v0.2.0/go.mod h1:xOKuQewGd1wO3llziO2K6CUUtr3FHGnJHUMRUIOCaHw=
+github.com/altessa-s/go-atlas-core v0.3.1 h1:/xSTFoK6pka/x+bJ1mqHHkEFOOhpRN/2gOZY3mZYUIQ=
+github.com/altessa-s/go-atlas-core v0.3.1/go.mod h1:xOKuQewGd1wO3llziO2K6CUUtr3FHGnJHUMRUIOCaHw=
 github.com/go-jose/go-jose/v4 v4.1.7 h1:Nac/98uT5LPkfbiFuYa8ktf62a2VxwQ4xbq1GK8pV5E=
 github.com/go-jose/go-jose/v4 v4.1.7/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=

@@ -32,10 +32,10 @@ github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751/go.mod h1:LOuy
 github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
 github.com/alecthomas/units v0.0.0-20190717042225-c3de453c63f4/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
 github.com/alecthomas/units v0.0.0-20190924025748-f65c72e2690d/go.mod h1:rBZYJk541a8SKzHPHnH3zbiI+7dagKZ0cgpgrD7Fyho=
-github.com/altessa-s/go-atlas-core v0.2.0 h1:ldDqdjOtm1rPiByVwhijAFx6Ss4IRKnpZ61dlx0y/T0=
-github.com/altessa-s/go-atlas-core v0.2.0/go.mod h1:xOKuQewGd1wO3llziO2K6CUUtr3FHGnJHUMRUIOCaHw=
-github.com/altessa-s/go-atlas-net v0.2.0 h1:VM2EoAgJNEfZblMNiMNEelhjk+Xi8NMWSg/Wt+VpA+4=
-github.com/altessa-s/go-atlas-net v0.2.0/go.mod h1:5hPPUgEtZiphdwl0OlucqE9q/2JlYn2D4LqMx3ykTZg=
+github.com/altessa-s/go-atlas-core v0.3.1 h1:/xSTFoK6pka/x+bJ1mqHHkEFOOhpRN/2gOZY3mZYUIQ=
+github.com/altessa-s/go-atlas-core v0.3.1/go.mod h1:xOKuQewGd1wO3llziO2K6CUUtr3FHGnJHUMRUIOCaHw=
+github.com/altessa-s/go-atlas-net v0.2.1 h1:9ueKILfiP/x7dYjekpz2Wlabmvagp9XN8lrqMxpsby8=
+github.com/altessa-s/go-atlas-net v0.2.1/go.mod h1:hxckjfE7N3z/tWbDi1ychR66dG1Dy47XNVJ3Z295Z0I=
 github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kdvxnR2qWY=
 github.com/apache/thrift v0.12.0/go.mod h1:cp2SuWMxlEZw2r+iP2GNCdIi4C1qmUzdZFSVb+bacwQ=
 github.com/apache/thrift v0.13.0/go.mod h1:cp2SuWMxlEZw2r+iP2GNCdIi4C1qmUzdZFSVb+bacwQ=
