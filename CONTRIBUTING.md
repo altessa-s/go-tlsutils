@@ -141,8 +141,11 @@ All `.go` files must include the copyright header. Run `make copyright` to add i
 | `make test-coverage` | Run tests with coverage report |
 | `make test-all` | Run tests with race, shuffle, and coverage |
 | `make test-coverage-func` | Per-package coverage breakdown |
+| `make test-integration` | Run in-process end-to-end tests (`-tags integration`) |
+| `make test-integration-docker` | Run Docker-backed integration tests (needs Docker; nested module `integration/docker`) |
 | `make bench` | Run all benchmarks |
 | `make bench-count` | Run benchmarks for benchstat |
+| `make bench-compare` | Compare benchmarks with `BASE` (default `origin/develop`); fails on regressions above `BENCH_THRESHOLD`% |
 | `make fuzz-list` | List every fuzz target |
 | `make fuzz-seed` | Run fuzz targets over their seed corpus only (no mutation) |
 | `make fuzz` | Fuzz every target for `FUZZTIME` each (`FUZZTIME=30s FUZZPKG=./...`) |

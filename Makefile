@@ -123,6 +123,14 @@ test-all: ## Run tests with race detector, shuffle, and coverage
 	@go tool cover -func=coverage.out | tail -1
 	@rm -f coverage.out
 
+.PHONY: test-integration
+test-integration: ## Run the in-process end-to-end integration tests (-tags integration)
+	@go test -race -shuffle=on -tags=integration ./...
+
+.PHONY: test-integration-docker
+test-integration-docker: ## Run the Docker-backed integration tests (needs Docker; nested module)
+	@go -C integration/docker test -tags integration_docker -count=1 -timeout 15m ./...
+
 .PHONY: bench
 bench: ## Run all benchmarks
 	@go test -bench=. -benchmem -run=^$$ ./... 2>&1 | awk -F'\t' '\
@@ -140,6 +148,10 @@ bench: ## Run all benchmarks
 bench-count: ## Run benchmarks multiple times for benchstat (COUNT=5)
 	@go test -bench=. -benchmem -run=^$$ -count=$${COUNT:-5} ./... | tee bench.txt
 	@echo "Results saved to bench.txt (use benchstat bench.txt)"
+
+.PHONY: bench-compare
+bench-compare: ## Compare benchmarks with BASE (default origin/develop); fails on regressions above BENCH_THRESHOLD%
+	@bash .github/scripts/bench-regression.sh $${BASE:-origin/develop}
 
 .PHONY: fuzz-inputs
 fuzz-inputs: # Refuse FUZZTIME and FUZZPKG outside their allowlists

@@ -2,6 +2,9 @@ version: "2"
 
 run:
   timeout: 5m
+  # Lint the in-process integration suite too; it builds only with this tag.
+  build-tags:
+    - integration
 
 linters:
   default: none

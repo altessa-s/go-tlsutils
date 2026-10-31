@@ -1,0 +1,42 @@
+name: Integration (Docker)
+
+# The in-process suite (-tags integration) runs in ci.yml's integration job;
+# this workflow covers the Docker-backed tier, which is go-tlsutils-specific
+# and lives outside the shared CI template.
+
+on:
+  workflow_call:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    name: Integration (Docker)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: integration/docker/go.mod
+          cache-dependency-path: integration/docker/go.sum
+
+      - name: Vet the Docker integration module
+        # Root go vet and golangci-lint do not descend into nested modules.
+        run: go -C integration/docker vet -tags integration_docker ./...
+
+      - name: Run Docker integration tests
+        # The suite lives in its own module so testcontainers never enters
+        # the library's go.mod. ubuntu-latest ships a Docker daemon.
+        run: go -C integration/docker test -tags integration_docker -count=1 -timeout 15m ./...
