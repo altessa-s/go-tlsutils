@@ -12,7 +12,7 @@ replace (
 )
 
 require (
-	github.com/altessa-s/go-tlsutils v0.1.0
+	github.com/altessa-s/go-tlsutils v0.2.1
 	github.com/altessa-s/go-tlsutils/providers/s3 v0.0.0-00010101000000-000000000000
 	github.com/altessa-s/go-tlsutils/providers/vault v0.0.0-00010101000000-000000000000
 	github.com/aws/aws-sdk-go-v2 v1.47.5
