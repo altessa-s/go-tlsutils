@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  workflow_call:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Run golangci-lint
+        # make golangci builds the linter from devtools/go.mod (its module
+        # graph pins a golang.org/x/tools that reads Go 1.27 export data; the
+        # golangci-lint-action goinstall mode fails typecheck) and runs it in
+        # every module listed in the Makefile's MODULES.
+        run: make golangci
+
+      - name: Run go vet and check go fix modernizers
+        # go fix -diff exits non-zero when any modernizer would rewrite code.
+        run: make vet
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Run tests
+        # Runs every module and merges their profiles into coverage.out.
+        run: make coverage
+
+      - name: Enforce coverage floor
+        env:
+          COVERAGE_MIN: "78"
+        run: |
+          COVERAGE=$(make --no-print-directory coverage-total | awk '{print $3}' | tr -d '%')
+          echo "Total coverage: ${COVERAGE}% (minimum ${COVERAGE_MIN}%)"
+          awk -v actual="$COVERAGE" -v minimum="$COVERAGE_MIN" 'BEGIN { exit !(actual ~ /^[0-9]+([.][0-9]+)?$/ && actual + 0 >= minimum) }'
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 7
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Run integration tests
+        run: make test-integration
+
+  cross-compile:
+    name: Cross-compile (${{ matrix.goos }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        # linux is covered by the main build; guard the platform-gated
+        # code (*_linux.go / *_other.go) against build-tag rot on the
+        # other supported targets.
+        goos: [darwin, windows]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+        run: make build
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Run govulncheck
+        run: make govulncheck
+
+      - name: Run gosec
+        run: make gosec
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # gitleaks scans the full commit history, not just the checkout.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Install gitleaks
+        run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
+
+      - name: Run gitleaks (full history)
+        run: gitleaks detect --redact --source . --config .gitleaks.toml

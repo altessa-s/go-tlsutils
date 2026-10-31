@@ -1,0 +1,30 @@
+# Commit Scopes for go-tlsutils
+# Use these scopes in conventional commits: type(scope): description
+# The scope is optional: omit it for repository-wide changes. Never use `root`.
+# Only the first word of a non-comment line is a scope.
+# Example: fix(ocsp): keep the cached staple on a soft failure
+
+# Repository scopes
+deps                        # Dependency updates (Dependabot writes build(deps): bump ...)
+README                      # Root README
+docs                        # Documentation
+
+# Packages
+tlsutils                         # Certificate loading and TLS defaults
+ocsp                             # OCSP stapling, cache and refresh
+providers                        # Certificate provider port
+providers/file                   # PEM files on disk
+providers/letsencrypt            # ACME / autocert
+providers/s3                     # S3-backed PEM
+providers/vault                  # Vault PKI
+providers/internal/certconfig    # Shared reload steps of the file and S3 providers
+providers/internal/staplertest   # Test-only OCSP stapler double
+spiffe                           # SPIFFE Workload API mTLS configs
+internal/testhelpers             # Shared test fixtures
+integration                      # In-process end-to-end integration tests
+integration/docker               # Docker-backed integration tests, nested module
+testdata                         # PEM fixtures
+
+# Tooling
+devtools                    # Development tool dependencies
+ci                          # GitHub Actions workflows and scripts

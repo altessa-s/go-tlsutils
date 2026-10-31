@@ -1,0 +1,448 @@
+// Copyright 2021-2026 ALTESSA SOLUTIONS INC.
+// Use of this source code is governed by the MIT license that can be found in
+// the LICENSE file.
+
+package tlsutils
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"slices"
+	"strings"
+
+	"github.com/youmark/pkcs8"
+
+	"github.com/altessa-s/go-atlas-core/io/files"
+
+	coreerrs "github.com/altessa-s/go-atlas-core/errors"
+)
+
+const (
+	pemTypeCertificate = "CERTIFICATE"
+
+	// maxKeyFilePermissions is the maximum allowed file mode for private key files.
+	// Key files must not be readable by group or others (i.e., at most 0600).
+	maxKeyFilePermissions os.FileMode = 0o600
+)
+
+// OCSPStapler defines the interface for OCSP stapling functionality.
+// OCSP stapling improves TLS handshake performance by including certificate
+// revocation status in the TLS handshake, reducing client-side OCSP requests.
+type OCSPStapler interface {
+	// GetOCSPStaple returns the OCSP staple for the given certificate.
+	// The context controls the HTTP request timeout and cancellation.
+	GetOCSPStaple(ctx context.Context, cert *tls.Certificate) ([]byte, error)
+	// RunRefreshAll refreshes all OCSP responses in the cache that need it.
+	// This method is designed to be called periodically via an external scheduler.
+	RunRefreshAll(ctx context.Context) error
+}
+
+// CloneCertificateWithOCSPStaple creates a shallow copy of the certificate with the provided OCSP staple.
+// This is useful when updating OCSP responses without modifying the original certificate.
+func CloneCertificateWithOCSPStaple(cert *tls.Certificate, ocspStaple []byte) *tls.Certificate {
+	clone := *cert
+	clone.OCSPStaple = ocspStaple
+	return &clone
+}
+
+var cipherSuits = []uint16{
+	// 1.3
+	tls.TLS_AES_128_GCM_SHA256,
+	tls.TLS_AES_256_GCM_SHA384,
+	tls.TLS_CHACHA20_POLY1305_SHA256,
+	// 1.2 (ECDSA certificates)
+	tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+	tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+	tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+	// 1.2 (RSA certificates) — without these an RSA cert cannot complete a
+	// TLS 1.2 handshake against this pinned list. All remain AEAD/forward-secret.
+	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+	tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+	tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+}
+
+// readKeyFile reads a private key file that must be a regular file not
+// accessible by group or others (at most 0600). The permissions are checked
+// on the descriptor that is then read, so the file cannot be swapped between
+// the check and the read.
+func readKeyFile(path string) ([]byte, error) {
+	f, err := files.OpenRegular(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if mode := info.Mode().Perm(); mode&^maxKeyFilePermissions != 0 {
+		return nil, fmt.Errorf("private key file %q has insecure permissions %04o, maximum allowed is %04o",
+			path, mode, maxKeyFilePermissions)
+	}
+	return io.ReadAll(f)
+}
+
+// loadPEM builds a certificate from the chain in certData (leaf first) and
+// the first private key in keyData, like tls.X509KeyPair: certificates are
+// taken only from certData and the key only from keyData, so a key bundled
+// into a certificate file never stands in for the key input. Every
+// CERTIFICATE block is kept so the chain reaches the issuer; the key is
+// decrypted with keyPassword when encrypted. tls.X509KeyPair then rejects a
+// key that does not match the leaf.
+func loadPEM(certData, keyData []byte, keyPassword string) (*tls.Certificate, error) {
+	var chain []byte
+	for rest := certData; ; {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type == pemTypeCertificate {
+			chain = append(chain, pem.EncodeToMemory(block)...)
+		}
+	}
+
+	var key []byte
+	for rest := keyData; ; {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if strings.HasSuffix(block.Type, "PRIVATE KEY") {
+			k, err := decodeKeyPEM(block, keyPassword)
+			if err != nil {
+				return nil, err
+			}
+			key = k
+			break
+		}
+	}
+
+	cert, err := tls.X509KeyPair(chain, key)
+	if err != nil {
+		return nil, err
+	}
+	return &cert, nil
+}
+
+// decodeKeyPEM returns block as plaintext PEM, decrypting encrypted PKCS#8
+// and legacy-encrypted (RFC 1423) keys with keyPassword.
+func decodeKeyPEM(block *pem.Block, keyPassword string) ([]byte, error) {
+	if block.Type == "ENCRYPTED PRIVATE KEY" {
+		if keyPassword == "" {
+			return nil, errors.New("password required for encrypted PKCS#8 key")
+		}
+		key, err := pkcs8.ParsePKCS8PrivateKey(block.Bytes, []byte(keyPassword))
+		if err != nil {
+			return nil, coreerrs.WrapOperation(err, "decrypt PKCS#8 private key")
+		}
+		der, err := x509.MarshalPKCS8PrivateKey(key)
+		if err != nil {
+			return nil, coreerrs.WrapOperation(err, "encode private key")
+		}
+		return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), nil
+	}
+
+	decrypted, encrypted, err := decryptLegacyPEMKey(block, keyPassword)
+	if err != nil {
+		return nil, err
+	}
+	if encrypted {
+		return decrypted, nil
+	}
+	return pem.EncodeToMemory(block), nil
+}
+
+// LoadFromBytes loads a certificate and private key from raw PEM bytes.
+// certPem may hold the full chain, leaf first; every certificate is kept.
+// Certificates are read only from certPem and the private key only from
+// keyPem.
+// Supports multiple private key formats including PKCS#8, PKCS#1 (RSA), SEC1 (EC),
+// and legacy-encrypted PEM formats. The keyPassword parameter is required for
+// encrypted private keys and ignored for unencrypted keys.
+//
+// Example:
+//
+//	cert, err := tlsutils.LoadFromBytes(certPem, keyPem, "password")
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+func LoadFromBytes(certPem, keyPem []byte, keyPassword string) (*tls.Certificate, error) {
+	return loadPEM(certPem, keyPem, keyPassword)
+}
+
+// LoadFromFile loads a certificate and private key from separate files.
+// Supports multiple private key formats including PKCS#8, PKCS#1 (RSA), SEC1 (EC),
+// and legacy-encrypted PEM formats. The keyPassword parameter is required for
+// encrypted private keys and ignored for unencrypted keys.
+//
+// Example:
+//
+//	cert, err := tlsutils.LoadFromFile("server.key", "server.crt", "password")
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+func LoadFromFile(keyPath, certPath, keyPassword string) (*tls.Certificate, error) {
+	certPem, err := files.ReadRegular(certPath)
+	if err != nil {
+		return nil, err
+	}
+
+	keyPem, err := readKeyFile(keyPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return LoadFromBytes(certPem, keyPem, keyPassword)
+}
+
+// LoadFromConcatenatedFile loads a certificate and private key from a single file.
+// The file should contain both the certificate and private key in PEM format;
+// certificates after the leaf are kept as the chain.
+// The keyPassword parameter is required for encrypted private keys.
+//
+// Example:
+//
+//	cert, err := tlsutils.LoadFromConcatenatedFile("server.pem", "password")
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+func LoadFromConcatenatedFile(certKeyFilePath, keyPassword string) (*tls.Certificate, error) {
+	data, err := readKeyFile(certKeyFilePath)
+	if err != nil {
+		return nil, err
+	}
+
+	return loadPEM(data, data, keyPassword)
+}
+
+// DefaultTLSConfig returns a secure default TLS configuration.
+// The configuration enforces TLS 1.2+ and uses modern cipher suites.
+// Suitable for most server applications requiring secure connections.
+//
+// Example:
+//
+//	config := tlsutils.DefaultTLSConfig()
+//	config.Certificates = []tls.Certificate{cert}
+//	server := &http.Server{TLSConfig: config}
+func DefaultTLSConfig() *tls.Config {
+	return &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		CipherSuites: slices.Clone(cipherSuits),
+	}
+}
+
+// DefaultTLSConfigStrict returns a server TLS configuration that
+// requires TLS 1.3. Modern clients all support TLS 1.3; locking it as
+// the minimum drops the long tail of weak suites the TLS 1.2 path
+// allows and removes downgrade attack surface entirely. The
+// CipherSuites field is intentionally left empty — for TLS 1.3 the
+// stdlib enforces its own modern AEAD-only list and the TLS 1.2
+// pinned suites are ignored.
+//
+// Example:
+//
+//	config := tlsutils.DefaultTLSConfigStrict()
+//	config.Certificates = []tls.Certificate{cert}
+//	server := &http.Server{TLSConfig: config}
+func DefaultTLSConfigStrict() *tls.Config {
+	return &tls.Config{
+		MinVersion: tls.VersionTLS13,
+	}
+}
+
+// DefaultClientTLSConfig returns a secure default TLS configuration for client connections.
+// The configuration enforces TLS 1.2+ and sets the server name for certificate validation.
+// The serverName parameter is used for SNI and certificate verification.
+//
+// Example:
+//
+//	config := tlsutils.DefaultClientTLSConfig("example.com")
+//	conn, err := tls.Dial("tcp", "example.com:443", config)
+func DefaultClientTLSConfig(serverName string) *tls.Config {
+	return &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		CipherSuites: slices.Clone(cipherSuits),
+		ServerName:   serverName,
+	}
+}
+
+// DefaultClientTLSConfigStrict is the client-side counterpart of
+// [DefaultTLSConfigStrict]. Use when you control both endpoints and
+// want to force TLS 1.3 across the wire.
+func DefaultClientTLSConfigStrict(serverName string) *tls.Config {
+	return &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		ServerName: serverName,
+	}
+}
+
+// clientCertificateSource supplies the client certificate presented during
+// a TLS handshake. It is the consumer-side view of
+// tlsproviders.ClientCertificate, declared here so this package does not
+// import its own providers subpackage. The stdlib calls the method whenever
+// the server requests a client certificate (mutual TLS).
+type clientCertificateSource interface {
+	GetClientCertificate(*tls.CertificateRequestInfo) (*tls.Certificate, error)
+}
+
+// ClientTLSConfig builds a TLS 1.3 client configuration that presents a
+// client certificate supplied by src on every handshake, for mutual TLS on
+// outgoing connections. The certificate is pulled per handshake, so a
+// rotating source (file watcher, Vault lease) is reflected without rebuilding
+// the config. serverName is used for SNI and server-certificate verification
+// against the system roots; set RootCAs on the returned config to pin a
+// private CA.
+//
+// Example:
+//
+//	cfg := tlsutils.ClientTLSConfig(provider, "peer.internal")
+//	conn, err := tls.Dial("tcp", "peer.internal:8443", cfg)
+func ClientTLSConfig(src clientCertificateSource, serverName string) *tls.Config {
+	cfg := DefaultClientTLSConfigStrict(serverName)
+	cfg.GetClientCertificate = src.GetClientCertificate
+	return cfg
+}
+
+// DialContext opens a mutual-TLS connection to addr, presenting the client
+// certificate from src. It is a thin convenience over [ClientTLSConfig] and
+// [tls.Dialer]. An empty serverName lets the dialer derive it from addr.
+//
+// Example:
+//
+//	conn, err := tlsutils.DialContext(ctx, "tcp", "peer.internal:8443", provider, "")
+func DialContext(ctx context.Context, network, addr string, src clientCertificateSource, serverName string) (net.Conn, error) {
+	d := tls.Dialer{Config: ClientTLSConfig(src, serverName)}
+	return d.DialContext(ctx, network, addr)
+}
+
+// ResolveMinTLSVersion translates a human-readable version string
+// ("1.2" / "1.3") into the corresponding [tls.VersionTLSxx] constant.
+// Empty or unrecognized inputs return the safe default ([tls.VersionTLS12])
+// and report ok=false so callers can reject the config rather than
+// silently accept a typo that would otherwise be ignored. Mirrors the
+// project's safety-mode pattern of fail-safe-on-unknown.
+//
+// Recognized values (case-insensitive, leading/trailing space trimmed):
+//   - "1.2", "tls1.2", "tlsv1.2" → [tls.VersionTLS12]
+//   - "1.3", "tls1.3", "tlsv1.3" → [tls.VersionTLS13]
+func ResolveMinTLSVersion(s string) (uint16, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "1.2", "tls1.2", "tlsv1.2":
+		return tls.VersionTLS12, true
+	case "1.3", "tls1.3", "tlsv1.3":
+		return tls.VersionTLS13, true
+	default:
+		return tls.VersionTLS12, false
+	}
+}
+
+// decryptLegacyPEMKey decrypts a private key block encrypted with legacy PEM
+// encryption (RFC 1423, marked by a DEK-Info header) when a password is set.
+// It returns the re-encoded plaintext PEM and encrypted=true for such a
+// block, and encrypted=false for any other block.
+func decryptLegacyPEMKey(block *pem.Block, keyPassword string) (pemKey []byte, encrypted bool, err error) {
+	if keyPassword == "" || block.Headers == nil {
+		return nil, false, nil
+	}
+	// Check if the PEM block is encrypted by looking for the DEK-Info header
+	if _, ok := block.Headers["DEK-Info"]; !ok {
+		return nil, false, nil
+	}
+	// Deprecated but required for legacy PEM encryption (RFC 1423).
+	// Modern PKCS#8 encryption is handled by decodeKeyPEM.
+	if !x509.IsEncryptedPEMBlock(block) { //nolint:staticcheck // SA1019: required for legacy PEM support
+		return nil, false, nil
+	}
+	buf, err := x509.DecryptPEMBlock(block, []byte(keyPassword)) //nolint:staticcheck // SA1019: required for legacy PEM support
+	if err != nil {
+		return nil, false, coreerrs.WrapOperation(err, "decrypt private key")
+	}
+
+	var encoded bytes.Buffer
+	if err := pem.Encode(&encoded, &pem.Block{Type: block.Type, Bytes: buf}); err != nil {
+		return nil, false, err
+	}
+	return encoded.Bytes(), true, nil
+}
+
+// BuildCAPool builds a certificate pool from CA certificate files.
+// If a system is true, starts with the system's certificate pool.
+// Additional CA certificates from caPath files are appended to the pool.
+// Returns nil if no valid certificates are found.
+//
+// Example:
+//
+//	pool, err := tlsutils.BuildCAPool(true, "ca1.crt", "ca2.crt")
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	config.RootCAs = pool
+func BuildCAPool(system bool, caPath ...string) (*x509.CertPool, error) {
+	var (
+		pool *x509.CertPool
+		err  error
+	)
+
+	if system {
+		pool, err = x509.SystemCertPool()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if pool == nil {
+		pool = x509.NewCertPool()
+	}
+
+	for _, path := range caPath {
+		caPem, err := files.ReadRegular(path)
+		if err != nil {
+			return nil, err
+		}
+
+		if !pool.AppendCertsFromPEM(caPem) {
+			return nil, fmt.Errorf("failed to parse any certificates from CA file %s", path)
+		}
+	}
+
+	return pool, nil
+}
+
+// ApplyMinTLSVersion resolves the YAML-supplied minVersion string into a
+// tls.VersionTLSxx constant via [ResolveMinTLSVersion] and applies
+// it to the provider-supplied tls.Config. When the operator pins TLS 1.3
+// the legacy 1.2 cipher list seeded by the provider is cleared so the
+// resulting config matches [DefaultTLSConfigStrict] semantics —
+// otherwise CipherSuites stays populated with 1.2-only entries that the
+// stdlib silently ignores under TLS 1.3 and operators reading the config
+// would assume those suites are still meaningful.
+//
+// An empty minVersion (legacy callers, or YAML that omitted the field) is
+// accepted as "leave the provider default in place"; any other unknown
+// value is rejected so a typo (e.g. "v1.3") cannot silently fall back to
+// the stdlib default.
+func ApplyMinTLSVersion(tlsConfig *tls.Config, raw string) error {
+	if raw == "" {
+		return nil
+	}
+	v, ok := ResolveMinTLSVersion(raw)
+	if !ok {
+		return fmt.Errorf("unknown TLS version %q: supported values are 1.2, 1.3", raw)
+	}
+	tlsConfig.MinVersion = v
+	if v == tls.VersionTLS13 {
+		tlsConfig.CipherSuites = nil
+	}
+	return nil
+}

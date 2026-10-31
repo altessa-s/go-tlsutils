@@ -1,0 +1,23 @@
+// Copyright 2021-2026 ALTESSA SOLUTIONS INC.
+// Use of this source code is governed by the MIT license that can be found in
+// the LICENSE file.
+
+package tlsfile
+
+//go:generate optgen generate --type=options  --all-fields
+
+import (
+	"context"
+	"log/slog"
+
+	tlsutils "github.com/altessa-s/go-tlsutils"
+)
+
+// FileConfig holds configuration for the file provider.
+type options struct {
+	enableWatcher    bool
+	logger           *slog.Logger
+	reloadNotifyChan chan struct{}
+	ocspStapler      tlsutils.OCSPStapler `optgen:"notnil"`
+	ctx              context.Context      `opt:"Context"`
+}

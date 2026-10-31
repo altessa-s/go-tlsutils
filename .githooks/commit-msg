@@ -1,0 +1,5 @@
+#!/bin/bash
+# Enable with: git config core.hooksPath .githooks
+set -euo pipefail
+repo_dir=$(git rev-parse --show-toplevel)
+exec bash "$repo_dir/.github/scripts/validate-commit-message.sh" < "$1"
