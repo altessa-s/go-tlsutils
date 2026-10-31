@@ -285,3 +285,75 @@ func TestBuildCAPool_Files(t *testing.T) {
 	_, err = tlsutils.BuildCAPool(false, filepath.Join(t.TempDir(), "missing.pem"))
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
+
+// intermediateAndLeaf builds a 2-certificate chain: a leaf signed by a
+// self-signed intermediate CA. The CA always uses an EC key; leafKey sets the
+// leaf's own key algorithm, so the chain-keeping behavior pinned by
+// TestLoad_KeepsChain (EC only, via testhelpers.CA) can be re-checked for
+// leaves using other key algorithms.
+func intermediateAndLeaf(t *testing.T, leafKey crypto.Signer) (chainPEM []byte, leafCert *x509.Certificate) {
+	t.Helper()
+	caKey := ecKey(t)
+	caTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "intermediate.test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		IsCA:         true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, caKey.Public(), caKey)
+	require.NoError(t, err)
+	caCert, err := x509.ParseCertificate(caDER)
+	require.NoError(t, err)
+
+	leafTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "leaf.test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, caCert, leafKey.Public(), caKey)
+	require.NoError(t, err)
+	leafCert, err = x509.ParseCertificate(leafDER)
+	require.NoError(t, err)
+
+	chainPEM = bytes.Join([][]byte{
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER}),
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}),
+	}, nil)
+	return chainPEM, leafCert
+}
+
+// TestLoadFromBytes_ChainKeyAlgorithms pins that LoadFromBytes keeps the
+// intermediate in a leaf+intermediate chain and loads the matching key
+// regardless of the leaf's own key algorithm — RSA and Ed25519 here,
+// complementing the ECDSA chain already covered by TestLoad_KeepsChain.
+func TestLoadFromBytes_ChainKeyAlgorithms(t *testing.T) {
+	t.Parallel()
+	rsaKey := testhelpers.GenerateRSAKey(t, 2048)
+	_, ed25519Key := testhelpers.GenerateEd25519Key(t)
+
+	tests := []struct {
+		name string
+		key  crypto.Signer
+	}{
+		{"rsa leaf", rsaKey},
+		{"ed25519 leaf", ed25519Key},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			chainPEM, leafCert := intermediateAndLeaf(t, tc.key)
+
+			cert, err := tlsutils.LoadFromBytes(chainPEM, pkcs8PEM(t, tc.key), "")
+			require.NoError(t, err)
+			require.Len(t, cert.Certificate, 2, "the intermediate must be kept in the chain")
+			require.Equal(t, leafCert.Raw, cert.Certificate[0])
+			signer, ok := cert.PrivateKey.(crypto.Signer)
+			require.True(t, ok)
+			require.True(t, signer.Public().(interface{ Equal(crypto.PublicKey) bool }).Equal(tc.key.Public()))
+		})
+	}
+}
