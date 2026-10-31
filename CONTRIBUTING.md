@@ -128,18 +128,35 @@ All `.go` files must include the copyright header. Run `make copyright` to add i
 // the LICENSE file.
 ```
 
+## Modules
+
+The repository holds several Go modules, listed in the Makefile's `MODULES`: the root (`tlsutils`, `ocsp`, `providers`, `providers/file`,
+`providers/letsencrypt`), `providers/s3`, `providers/vault`, `spiffe`, and the test-only `integration` and `integration/docker`. Every Go target runs
+in each module, so `make lint`, `make test-all` and the rest cover all of them; run `go` commands for a sub-module from its directory (or with
+`go -C <dir>`). A sub-module builds against the checkout through a `replace` directive; `go.work` is not committed. Add a new module to `MODULES`,
+`.github/dependabot.yml` and `commit_scopes.txt`.
+
+Releases tag each changed module separately, root first: tag the root (`vX.Y.Z`), then set each sub-module's `require` of the root to that version,
+commit, and tag the sub-module (`providers/s3/vX.Y.Z`, `providers/vault/vX.Y.Z`, `spiffe/vX.Y.Z`). Consumers ignore `replace`, so a sub-module
+release must never require the placeholder root version.
+
 ## Makefile Targets
 
 | Target | Description |
 |--------|-------------|
 | `make fmt` | Format code and sort imports |
-| `make lint` | Run golangci-lint with the repo config (`.golangci.yml`) |
+| `make lint` | Tidy, format and run golangci-lint with the repo config (`.golangci.yml`) in every module |
+| `make golangci` | Run golangci-lint in every module without rewriting files (as CI does) |
+| `make vet` | Run go vet and the go fix modernizer check in every module |
+| `make build` | Build every module (honors `GOOS`/`GOARCH`) |
 | `make test` | Run all tests |
 | `make test-verbose` | Run tests with verbose output |
 | `make test-race` | Run tests with race detector |
 | `make test-shuffle` | Run tests with randomized order |
 | `make test-coverage` | Run tests with coverage report |
 | `make test-all` | Run tests with race, shuffle, and coverage |
+| `make coverage` | Run tests with race and shuffle, merging every module's profile into `coverage.out` |
+| `make coverage-total` | Print the total statement coverage of `coverage.out` |
 | `make test-coverage-func` | Per-package coverage breakdown |
 | `make test-integration` | Run unit and integration tests (`-tags integration`) with race detector and shuffle |
 | `make test-integration-docker` | Run the Docker-backed integration tests (needs Docker; nested module integration/docker) |
@@ -148,12 +165,14 @@ All `.go` files must include the copyright header. Run `make copyright` to add i
 | `make bench-compare` | Compare benchmarks with `BASE` (default `origin/develop`); fails on regressions above `BENCH_THRESHOLD`% |
 | `make fuzz-list` | List every fuzz target |
 | `make fuzz-seed` | Run fuzz targets over their seed corpus only (no mutation) |
-| `make fuzz` | Fuzz every target for `FUZZTIME` each (`FUZZTIME=30s FUZZPKG=./...`) |
+| `make fuzz` | Fuzz every target for `FUZZTIME` each (`FUZZTIME=30s FUZZPKG=./...`; `FUZZPKG` is a repository path and may name a sub-module) |
 | `make dupl` | Find code duplication |
 | `make dupl-check` | Fail on code duplication |
 | `make copyright` | Add copyright headers |
 | `make generate` | Build pinned optgen and gci into `bin/` and regenerate options |
-| `make tidy` | Run go mod tidy |
+| `make tidy` | Run go mod tidy in every module |
+| `make govulncheck` | Run govulncheck in every module |
+| `make gosec` | Run gosec in every module |
 | `make security-scan` | Run govulncheck and gosec |
 
 ## Generated options

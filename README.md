@@ -35,6 +35,20 @@ Go 1.27 or later (`go 1.27.0` in `go.mod`).
 | [providers/vault](./providers/vault)             | Vault PKI engine certificates                    |
 | [spiffe](./spiffe)                               | Rotating mTLS configs from the SPIFFE Workload API |
 
+## Modules
+
+`providers/s3`, `providers/vault` and `spiffe` are separate Go modules, so importing the root module never pulls in (or raises the version of) the AWS
+SDK, the Vault client, go-spiffe or gRPC. The import paths are unchanged; require each provider module you use alongside the root:
+
+```sh
+go get github.com/altessa-s/go-tlsutils                  # tlsutils, ocsp, providers, providers/file, providers/letsencrypt
+go get github.com/altessa-s/go-tlsutils/providers/s3     # S3 provider
+go get github.com/altessa-s/go-tlsutils/providers/vault  # Vault PKI provider
+go get github.com/altessa-s/go-tlsutils/spiffe           # SPIFFE Workload API
+```
+
+Each module is tagged separately (`v0.x.y` for the root, `providers/s3/v0.x.y`, `providers/vault/v0.x.y`, `spiffe/v0.x.y`).
+
 ## Functions
 
 | Function                           | Description                              |
@@ -55,10 +69,10 @@ Go 1.27 or later (`go 1.27.0` in `go.mod`).
 
 ## Design principles
 
-- **Minimal dependencies** — the Go standard library and [go-atlas-core](https://github.com/altessa-s/go-atlas-core), plus package-scoped SDKs:
-  `youmark/pkcs8` (encrypted PKCS#8 keys), `golang.org/x/crypto/ocsp`, `golang.org/x/crypto/acme` and `acme/autocert` (Let's Encrypt),
-  `fsnotify` (file provider), `aws-sdk-go-v2` (S3 provider), `hashicorp/vault/api` and `johanbrandhorst/certify` (Vault PKI),
-  `spiffe/go-spiffe/v2` and `google.golang.org/grpc` (SPIFFE Workload API).
+- **Minimal dependencies** — the root module needs the Go standard library, [go-atlas-core](https://github.com/altessa-s/go-atlas-core),
+  `youmark/pkcs8` (encrypted PKCS#8 keys), `golang.org/x/crypto` (`ocsp`, `acme`/`autocert` for Let's Encrypt) and `fsnotify` (file provider).
+  The heavy SDKs live in their own modules: `aws-sdk-go-v2` (`providers/s3`), `hashicorp/vault/api`, `johanbrandhorst/certify` and
+  [go-atlas-net](https://github.com/altessa-s/go-atlas-net) (`providers/vault`), `spiffe/go-spiffe/v2` and `google.golang.org/grpc` (`spiffe`).
 - **No metrics, health or config schemas.** Packages are configured through options; configuration mapping and telemetry belong to the caller.
 - **SDKs stay inside the provider that needs them.** The root package, `ocsp` and `providers` do not import AWS, Vault, ACME or SPIFFE.
 - **Safe by default** — `DefaultTLSConfig` is TLS 1.2+; the OCSP failure mode defaults to soft and hard mode is opt-in.
