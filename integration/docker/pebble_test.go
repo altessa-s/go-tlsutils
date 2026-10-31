@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+
 	"golang.org/x/crypto/acme"
 
 	tlsletsencrypt "github.com/altessa-s/go-tlsutils/providers/letsencrypt"

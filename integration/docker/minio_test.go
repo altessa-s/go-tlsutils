@@ -18,9 +18,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
-	tcminio "github.com/testcontainers/testcontainers-go/modules/minio"
 
 	tlss3 "github.com/altessa-s/go-tlsutils/providers/s3"
+	tcminio "github.com/testcontainers/testcontainers-go/modules/minio"
 )
 
 const (

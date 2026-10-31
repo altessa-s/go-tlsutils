@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
-	tcvault "github.com/testcontainers/testcontainers-go/modules/vault"
 
 	tlsvault "github.com/altessa-s/go-tlsutils/providers/vault"
+	vaultapi "github.com/hashicorp/vault/api"
+	tcvault "github.com/testcontainers/testcontainers-go/modules/vault"
 )
 
 const (

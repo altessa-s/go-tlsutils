@@ -28,9 +28,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	xocsp "golang.org/x/crypto/ocsp"
 
 	"github.com/altessa-s/go-tlsutils/internal/testhelpers"
+
+	xocsp "golang.org/x/crypto/ocsp"
 )
 
 const (

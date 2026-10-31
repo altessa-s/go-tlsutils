@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altessa-s/go-tlsutils/ocsp"
+
 	tlsfile "github.com/altessa-s/go-tlsutils/providers/file"
 )
 

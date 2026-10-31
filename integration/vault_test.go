@@ -22,6 +22,7 @@ import (
 
 	"github.com/altessa-s/go-tlsutils/internal/testhelpers"
 	"github.com/altessa-s/go-tlsutils/ocsp"
+
 	tlsvault "github.com/altessa-s/go-tlsutils/providers/vault"
 )
 

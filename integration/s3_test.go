@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altessa-s/go-tlsutils/ocsp"
+
 	tlss3 "github.com/altessa-s/go-tlsutils/providers/s3"
 )
 
