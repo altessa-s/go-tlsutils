@@ -42,6 +42,7 @@ type S3 struct {
 
 	mu        sync.RWMutex
 	tlsConfig *tls.Config
+	cert      *tls.Certificate // loaded with tlsConfig, served as the client certificate
 	certETag  string
 	keyETag   string
 
@@ -150,6 +151,26 @@ func (p *S3) TLSConfig() (*tls.Config, error) {
 	return p.tlsConfig.Clone(), nil
 }
 
+// GetClientCertificate returns a copy of the currently loaded certificate for
+// mutual TLS, reflecting the latest reload. It implements the
+// tls.Config.GetClientCertificate callback, so the provider can be passed to
+// [tlsutils.ClientTLSConfig] or [tlsutils.DialContext]. The certificate is not
+// OCSP-stapled: staples are a server-side mechanism.
+//
+// Example:
+//
+//	cfg := tlsutils.ClientTLSConfig(provider, "peer.internal")
+func (p *S3) GetClientCertificate(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if p.cert == nil {
+		return nil, errors.New("TLS certificate not loaded")
+	}
+	cert := *p.cert
+	return &cert, nil
+}
+
 // Close stops the polling goroutine and releases all resources.
 // The context controls the graceful shutdown timeout.
 //
@@ -191,6 +212,7 @@ func (p *S3) loadCertificate(ctx context.Context) error {
 
 	p.mu.Lock()
 	p.tlsConfig = tlsConfig
+	p.cert = cert
 	p.certETag = certETag
 	p.keyETag = keyETag
 	p.mu.Unlock()
@@ -313,4 +335,7 @@ func defaultS3Client(ctx context.Context) (*s3.Client, error) {
 	return s3.NewFromConfig(cfg), nil
 }
 
-var _ tlsproviders.Provider = (*S3)(nil)
+var (
+	_ tlsproviders.Provider          = (*S3)(nil)
+	_ tlsproviders.ClientCertificate = (*S3)(nil)
+)
