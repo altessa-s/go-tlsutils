@@ -42,6 +42,30 @@ func BenchmarkTLSConfig(b *testing.B) {
 	}
 }
 
+// BenchmarkTLSConfig_Parallel measures TLSConfig under concurrent readers —
+// the shape production traffic hits it in, since every accepted connection
+// calls it independently while the watcher may be reloading in the
+// background.
+func BenchmarkTLSConfig_Parallel(b *testing.B) {
+	certPEM, keyPEM, _ := testhelpers.SelfSignedCert(b)
+	certPath, keyPath := testhelpers.WriteTempCertFiles(b, certPEM, keyPEM)
+
+	f, err := tlsfile.NewWithCertAndKey(certPath, keyPath, "")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer f.Close(b.Context())
+
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if _, err := f.TLSConfig(); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
 func BenchmarkType(b *testing.B) {
 	certPEM, keyPEM, _ := testhelpers.SelfSignedCert(b)
 	certPath, keyPath := testhelpers.WriteTempCertFiles(b, certPEM, keyPEM)
