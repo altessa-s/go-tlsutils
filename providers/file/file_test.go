@@ -6,6 +6,7 @@ package tlsfile_test
 
 import (
 	"context"
+	"crypto/tls"
 	"os"
 	"testing"
 	"time"
@@ -89,6 +90,42 @@ func TestFile_TLSConfig_ReturnsCopy(t *testing.T) {
 	// Modifying one should not affect the other
 	cfg1.ServerName = "modified"
 	require.NotEqual(t, "modified", cfg2.ServerName)
+}
+
+// TestFile_GetClientCertificate_ReflectsReload pins that, like TLSConfig,
+// GetClientCertificate serves the rewritten certificate once the watcher
+// reloads it rather than the one loaded at construction.
+func TestFile_GetClientCertificate_ReflectsReload(t *testing.T) {
+	t.Parallel()
+	certPEM, keyPEM, _ := testhelpers.SelfSignedCert(t)
+	certPath, keyPath := testhelpers.WriteTempCertFiles(t, certPEM, keyPEM)
+	notify := make(chan struct{}, 1)
+
+	f, err := tlsfile.NewWithCertAndKey(certPath, keyPath, "",
+		tlsfile.WithEnableWatcher(),
+		tlsfile.WithReloadNotifyChan(notify),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = f.Close(t.Context()) })
+	<-notify // initial load
+
+	before, err := f.GetClientCertificate(&tls.CertificateRequestInfo{})
+	require.NoError(t, err)
+
+	newCertPEM, newKeyPEM, _ := testhelpers.SelfSignedCert(t)
+	require.NoError(t, os.WriteFile(keyPath, newKeyPEM, 0o600))
+	require.NoError(t, os.WriteFile(certPath, newCertPEM, 0o600))
+
+	select {
+	case <-notify:
+	case <-time.After(10 * time.Second):
+		require.Fail(t, "timeout waiting for certificate reload")
+	}
+
+	after, err := f.GetClientCertificate(&tls.CertificateRequestInfo{})
+	require.NoError(t, err)
+	require.NotEqual(t, before.Certificate, after.Certificate,
+		"GetClientCertificate must serve the rewritten certificate after reload")
 }
 
 func TestFile_Close(t *testing.T) {
