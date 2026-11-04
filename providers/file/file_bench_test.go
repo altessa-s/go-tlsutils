@@ -17,11 +17,13 @@ func BenchmarkNewWithCertAndKey(b *testing.B) {
 	certPath, keyPath := testhelpers.WriteTempCertFiles(b, certPEM, keyPEM)
 
 	b.ResetTimer()
+
 	for b.Loop() {
 		f, err := tlsfile.NewWithCertAndKey(certPath, keyPath, "")
 		if err != nil {
 			b.Fatal(err)
 		}
+
 		f.Close(b.Context())
 	}
 }
@@ -37,6 +39,7 @@ func BenchmarkTLSConfig(b *testing.B) {
 	defer f.Close(b.Context())
 
 	b.ResetTimer()
+
 	for b.Loop() {
 		_, _ = f.TLSConfig()
 	}
@@ -77,6 +80,7 @@ func BenchmarkType(b *testing.B) {
 	defer f.Close(b.Context())
 
 	b.ResetTimer()
+
 	for b.Loop() {
 		_ = f.Type()
 	}

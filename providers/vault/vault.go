@@ -75,6 +75,7 @@ func (v *Vault) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, er
 	if hello == nil {
 		return nil, ErrNilHandshakeInfo
 	}
+
 	cert, err := v.cc.GetCertificate(hello)
 	if err != nil {
 		return nil, err
@@ -94,6 +95,7 @@ func (v *Vault) GetClientCertificate(info *tls.CertificateRequestInfo) (*tls.Cer
 	if info == nil {
 		return nil, ErrNilHandshakeInfo
 	}
+
 	cert, err := v.cc.GetClientCertificate(info)
 	if err != nil {
 		return nil, err
@@ -158,6 +160,7 @@ func (v *Vault) Close(ctx context.Context) error {
 		if cc, ok := v.authMethod.(contextCloser); ok {
 			return cc.Close(ctx)
 		}
+
 		if cl, ok := v.authMethod.(io.Closer); ok {
 			return cl.Close()
 		}
@@ -241,11 +244,13 @@ type renewingToken struct {
 func (r *renewingToken) SetToken(ctx context.Context, cli *vaultApi.Client) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	err := r.inner.SetToken(ctx, cli)
 	if !r.tried {
 		r.tried = true
 		r.started = err == nil
 	}
+
 	return err
 }
 
@@ -253,9 +258,11 @@ func (r *renewingToken) SetToken(ctx context.Context, cli *vaultApi.Client) erro
 func (r *renewingToken) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	if !r.started {
 		return nil
 	}
+
 	return r.inner.Close()
 }
 

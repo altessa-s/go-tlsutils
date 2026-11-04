@@ -20,6 +20,7 @@ import (
 // do not depend on network round-trips.
 func newBenchProvider(tb testing.TB) *tlsletsencrypt.LetsEncrypt {
 	tb.Helper()
+
 	le, err := tlsletsencrypt.New(
 		tlsletsencrypt.WithDomains("example.com"),
 		tlsletsencrypt.WithEmail("admin@example.com"),
@@ -30,7 +31,9 @@ func newBenchProvider(tb testing.TB) *tlsletsencrypt.LetsEncrypt {
 	if err != nil {
 		tb.Fatal(err)
 	}
+
 	tb.Cleanup(func() { _ = le.Close(context.Background()) })
+
 	return le
 }
 
@@ -40,6 +43,7 @@ func BenchmarkTLSConfig(b *testing.B) {
 	le := newBenchProvider(b)
 
 	b.ReportAllocs()
+
 	for b.Loop() {
 		_, _ = le.TLSConfig()
 	}
@@ -53,6 +57,7 @@ func BenchmarkGetCertificate_RejectedHost(b *testing.B) {
 	hello := &tls.ClientHelloInfo{ServerName: "not-configured.example.org"}
 
 	b.ReportAllocs()
+
 	for b.Loop() {
 		_, _ = le.GetCertificate(hello)
 	}

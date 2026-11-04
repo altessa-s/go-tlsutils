@@ -46,14 +46,18 @@ type fakePKI struct {
 func (f *fakePKI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
 	f.paths = append(f.paths, r.Method+" "+r.URL.Path)
+
 	f.tokens = append(f.tokens, r.Header.Get("X-Vault-Token"))
 	if f.fail {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"errors":["permission denied"]}`))
+
 		return
 	}
+
 	var body struct {
 		CSR string `json:"csr"`
 	}
@@ -61,12 +65,15 @@ func (f *fakePKI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	block, _ := pem.Decode([]byte(body.CSR))
+
 	csr, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	f.csrs = append(f.csrs, csr)
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
@@ -78,11 +85,13 @@ func (f *fakePKI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 	}
+
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, f.ca.Cert, csr.PublicKey, f.ca.Key)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
 		"certificate": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
@@ -95,6 +104,7 @@ func newFakePKI(t *testing.T) (*fakePKI, *httptest.Server) {
 	f := &fakePKI{ca: testhelpers.NewCA(t)}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
+
 	return f, srv
 }
 
@@ -199,25 +209,32 @@ func (stapleStapler) RunRefreshAll(context.Context) error { return nil }
 // ClientHelloInfo carries a context.
 func handshake(t *testing.T, v *tlsvault.Vault) (tls.ConnectionState, error) {
 	t.Helper()
+
 	serverCfg, err := v.TLSConfig()
 	require.NoError(t, err)
+
 	cConn, sConn := net.Pipe()
+
 	t.Cleanup(func() { _ = cConn.Close(); _ = sConn.Close() })
 
 	srv := tls.Server(sConn, serverCfg)
+
 	done := make(chan error, 1)
 	go func() { done <- srv.HandshakeContext(t.Context()) }()
 
 	//nolint:gosec // the test inspects the stapled response, not the chain
 	client := tls.Client(cConn, &tls.Config{ServerName: "svc.example.com", InsecureSkipVerify: true})
+
 	cErr := client.HandshakeContext(t.Context())
 	if cErr != nil {
 		_ = cConn.Close()
 	}
+
 	sErr := <-done
 	if sErr != nil {
 		return tls.ConnectionState{}, sErr
 	}
+
 	return client.ConnectionState(), cErr
 }
 
@@ -226,6 +243,7 @@ func TestGetCertificate_OCSPStapling(t *testing.T) {
 	_, srv := newFakePKI(t)
 	newProvider := func(t *testing.T, opt tlsvault.Option) *tlsvault.Vault {
 		t.Helper()
+
 		v, err := tlsvault.New(
 			tlsvault.WithEndpoint(srv.URL),
 			tlsvault.WithStaticToken("s.static"),
@@ -234,6 +252,7 @@ func TestGetCertificate_OCSPStapling(t *testing.T) {
 			opt,
 		)
 		require.NoError(t, err)
+
 		return v
 	}
 
@@ -251,6 +270,7 @@ func TestGetCertificate_OCSPStapling(t *testing.T) {
 
 func TestNew_OptionErrors(t *testing.T) {
 	t.Parallel()
+
 	_, err := tlsvault.New(tlsvault.WithIPSubjectAlternativeNames("not-an-ip"))
 	require.ErrorIs(t, err, tlsvault.ErrInvalidIP)
 
@@ -267,6 +287,7 @@ func TestNew_OptionErrors(t *testing.T) {
 
 func TestWithRenewableToken_RejectsMissingToken(t *testing.T) {
 	t.Parallel()
+
 	for name, tok := range map[string]*tlsvault.Token{
 		"nil":           nil,
 		"zero value":    {},
@@ -274,6 +295,7 @@ func TestWithRenewableToken_RejectsMissingToken(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+
 			_, err := tlsvault.New(tlsvault.WithRenewableToken(tok))
 			require.ErrorIs(t, err, tlsvault.ErrInvalidToken)
 		})
@@ -282,6 +304,7 @@ func TestWithRenewableToken_RejectsMissingToken(t *testing.T) {
 
 func TestClose_RenewableTokenNeverAuthenticated(t *testing.T) {
 	t.Parallel()
+
 	v, err := tlsvault.New(
 		tlsvault.WithEndpoint("http://127.0.0.1:1"),
 		tlsvault.WithRenewableToken(tlsvault.NewToken("s.renew", time.Hour, time.Minute)),
@@ -302,16 +325,20 @@ func newRenewableVault(t *testing.T) (*fakePKI, *httptest.Server) {
 		fail := f.fail
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
+
 		if fail {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"errors":["permission denied"]}`))
+
 			return
 		}
+
 		_, _ = w.Write([]byte(`{"data":{"renewable":true,"ttl":3600}}`))
 	})
 	mux.Handle("/", f)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
+
 	return f, srv
 }
 
@@ -381,6 +408,7 @@ func TestGetCertificate_StaplesWithoutHandshakeContext(t *testing.T) {
 
 func TestGetCertificate_NilHandshakeInfo(t *testing.T) {
 	t.Parallel()
+
 	v, err := tlsvault.New(tlsvault.WithStaticToken("s.static"))
 	require.NoError(t, err)
 
@@ -392,7 +420,9 @@ func TestGetCertificate_NilHandshakeInfo(t *testing.T) {
 
 func TestLogger_EmitsFieldsAtEnabledLevels(t *testing.T) {
 	t.Parallel()
+
 	var buf bytes.Buffer
+
 	l := tlsvault.NewLoggerWithContext(t.Context(),
 		slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 

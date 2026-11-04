@@ -51,6 +51,7 @@ func (t ProviderType) IsValid() bool {
 	case ProviderTypeVault, ProviderTypeFile, ProviderTypeLetsEncrypt, ProviderTypeS3:
 		return true
 	}
+
 	return false
 }
 
@@ -131,6 +132,7 @@ func (p *Providers) Get(t ProviderType) (Provider, bool) {
 	defer p.mu.RUnlock()
 
 	provider, ok := p.providers[t]
+
 	return provider, ok
 }
 

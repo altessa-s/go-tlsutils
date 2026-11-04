@@ -48,13 +48,17 @@ func TestFile_GetClientCertificate_MutualTLS(t *testing.T) {
 	clientCfg.RootCAs = ca.Pool
 
 	cConn, sConn := net.Pipe()
+
 	t.Cleanup(func() { _ = cConn.Close(); _ = sConn.Close() })
+
 	srv := tls.Server(sConn, serverCfg)
+
 	done := make(chan error, 1)
 	go func() { done <- srv.HandshakeContext(t.Context()) }()
 
 	require.NoError(t, tls.Client(cConn, clientCfg).HandshakeContext(t.Context()))
 	require.NoError(t, <-done)
+
 	peers := srv.ConnectionState().PeerCertificates
 	require.NotEmpty(t, peers)
 	require.Equal(t, "client", peers[0].Subject.CommonName)
@@ -66,7 +70,9 @@ func pemCert(cert tls.Certificate) []byte {
 
 func pemKey(tb testing.TB, cert tls.Certificate) []byte {
 	tb.Helper()
+
 	der, err := x509.MarshalPKCS8PrivateKey(cert.PrivateKey)
 	require.NoError(tb, err)
+
 	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 }

@@ -76,6 +76,7 @@ func TestFile_ReloadFailureKeepsOldConfig(t *testing.T) {
 
 	original, err := f.TLSConfig()
 	require.NoError(t, err)
+
 	originalCert := original.Certificates[0].Certificate[0]
 
 	// Corrupt the key file. The watcher picks up the write, loadCertificate

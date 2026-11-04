@@ -98,6 +98,7 @@ func (s *Stapler) FailureMode() FailureMode {
 	if s.failureMode == "" {
 		return DefaultFailureMode
 	}
+
 	return s.failureMode
 }
 
@@ -178,6 +179,7 @@ func (s *Stapler) GetOCSPStaple(ctx context.Context, cert *tls.Certificate) ([]b
 		leafCert = cert.Leaf
 	} else {
 		var err error
+
 		leafCert, err = x509.ParseCertificate(cert.Certificate[0])
 		if err != nil {
 			return nil, coreerrs.WrapOperation(err, "parse certificate")
@@ -196,14 +198,18 @@ func (s *Stapler) GetOCSPStaple(ctx context.Context, cert *tls.Certificate) ([]b
 	// fetch would, and never outlives it. Callers that joined receive the
 	// same result; every caller still stops waiting on its own context.
 	first := ctx
+
 	return s.fetches.Do(ctx, key, func(ctx context.Context) ([]byte, error) {
 		if deadline, ok := first.Deadline(); ok {
 			var cancelDeadline context.CancelFunc
+
 			ctx, cancelDeadline = context.WithDeadline(ctx, deadline)
 			defer cancelDeadline()
 		}
+
 		ctx, cancel := context.WithCancelCause(ctx)
 		defer cancel(nil)
+
 		stop := context.AfterFunc(first, func() { cancel(context.Cause(first)) })
 		defer stop()
 		// A fetch that finished between the cache check and joining stored
@@ -211,11 +217,14 @@ func (s *Stapler) GetOCSPStaple(ctx context.Context, cert *tls.Certificate) ([]b
 		if response, ok := s.cachedResponse(key); ok {
 			return response, nil
 		}
+
 		response, nextUpdate, err := s.fetchOCSPResponse(ctx, cert, leafCert)
 		if err != nil {
 			return nil, err
 		}
+
 		s.store(key, &ocspCacheEntry{response: response, nextUpdate: nextUpdate, cert: cert})
+
 		return response, nil
 	})
 }
@@ -227,15 +236,18 @@ func (s *Stapler) cachedResponse(key string) ([]byte, bool) {
 	s.mu.RLock()
 	entry, exists := s.cache[key]
 	s.mu.RUnlock()
+
 	if !exists {
 		return nil, false
 	}
 
 	entry.mu.RLock()
 	defer entry.mu.RUnlock()
+
 	if !time.Now().Before(entry.nextUpdate) {
 		return nil, false
 	}
+
 	return entry.response, true
 }
 

@@ -56,6 +56,7 @@ type OCSPStapler interface {
 func CloneCertificateWithOCSPStaple(cert *tls.Certificate, ocspStaple []byte) *tls.Certificate {
 	clone := *cert
 	clone.OCSPStaple = ocspStaple
+
 	return &clone
 }
 
@@ -90,10 +91,12 @@ func readKeyFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if mode := info.Mode().Perm(); mode&^maxKeyFilePermissions != 0 {
 		return nil, fmt.Errorf("private key file %q has insecure permissions %04o, maximum allowed is %04o",
 			path, mode, maxKeyFilePermissions)
 	}
+
 	return io.ReadAll(f)
 }
 
@@ -106,12 +109,15 @@ func readKeyFile(path string) ([]byte, error) {
 // key that does not match the leaf.
 func loadPEM(certData, keyData []byte, keyPassword string) (*tls.Certificate, error) {
 	var chain []byte
+
 	for rest := certData; ; {
 		var block *pem.Block
+
 		block, rest = pem.Decode(rest)
 		if block == nil {
 			break
 		}
+
 		if block.Type == pemTypeCertificate {
 			chain = append(chain, pem.EncodeToMemory(block)...)
 		}
@@ -121,16 +127,19 @@ func loadPEM(certData, keyData []byte, keyPassword string) (*tls.Certificate, er
 	if err != nil {
 		return nil, err
 	}
+
 	der, err := x509.MarshalPKCS8PrivateKey(signer)
 	if err != nil {
 		return nil, coreerrs.WrapOperation(err, "encode private key")
 	}
+
 	key := pem.EncodeToMemory(&pem.Block{Type: pemTypePrivateKey, Bytes: der})
 
 	cert, err := tls.X509KeyPair(chain, key)
 	if err != nil {
 		return nil, err
 	}
+
 	return &cert, nil
 }
 
@@ -156,10 +165,12 @@ type PrivateKeyError struct {
 	Err error
 }
 
+// Error returns "parse private key", followed by the cause when there is one.
 func (e *PrivateKeyError) Error() string {
 	if e.Err == nil {
 		return "parse private key"
 	}
+
 	return "parse private key: " + e.Err.Error()
 }
 
@@ -184,14 +195,18 @@ func ParsePrivateKeyPEM(pemData []byte, password string) (crypto.Signer, error) 
 		if block == nil {
 			return nil, &PrivateKeyError{Err: ErrInvalidPrivateKey}
 		}
+
 		rest = remaining
+
 		if !strings.HasSuffix(block.Type, pemTypePrivateKey) {
 			continue
 		}
+
 		plaintext, err := decodeKeyPEM(block, password)
 		if err != nil {
 			return nil, &PrivateKeyError{Err: err}
 		}
+
 		decoded, _ := pem.Decode(plaintext)
 		if decoded == nil {
 			return nil, &PrivateKeyError{Err: ErrInvalidPrivateKey}
@@ -200,6 +215,7 @@ func ParsePrivateKeyPEM(pemData []byte, password string) (crypto.Signer, error) 
 		if key, err := x509.ParsePKCS1PrivateKey(decoded.Bytes); err == nil {
 			return key, nil
 		}
+
 		if key, err := x509.ParsePKCS8PrivateKey(decoded.Bytes); err == nil {
 			switch key := key.(type) {
 			case *rsa.PrivateKey:
@@ -212,6 +228,7 @@ func ParsePrivateKeyPEM(pemData []byte, password string) (crypto.Signer, error) 
 				return nil, &PrivateKeyError{Err: ErrInvalidPrivateKey}
 			}
 		}
+
 		if key, err := x509.ParseECPrivateKey(decoded.Bytes); err == nil {
 			return key, nil
 		}
@@ -220,6 +237,7 @@ func ParsePrivateKeyPEM(pemData []byte, password string) (crypto.Signer, error) 
 		if x509.IsEncryptedPEMBlock(block) { //nolint:staticcheck // SA1019: required for legacy PEM support
 			return nil, &PrivateKeyError{Err: ErrIncorrectPassword}
 		}
+
 		return nil, &PrivateKeyError{Err: ErrInvalidPrivateKey}
 	}
 }
@@ -235,25 +253,31 @@ func decodeKeyPEM(block *pem.Block, keyPassword string) (plaintext []byte, err e
 			plaintext, err = nil, ErrInvalidPrivateKey
 		}
 	}()
+
 	if block.Type == pemTypeEncryptedPrivateKey {
 		if keyPassword == "" {
 			return nil, ErrPasswordRequired
 		}
+
 		if err = validatePrivateKeyKDF(block.Bytes); err != nil {
 			return nil, err
 		}
+
 		key, parseErr := pkcs8.ParsePKCS8PrivateKey(block.Bytes, []byte(keyPassword))
 		if parseErr != nil {
 			// The pinned dependency exposes this condition only as a string.
 			if parseErr.Error() == "pkcs8: incorrect password" {
 				return nil, ErrIncorrectPassword
 			}
+
 			return nil, ErrInvalidPrivateKey
 		}
+
 		der, marshalErr := x509.MarshalPKCS8PrivateKey(key)
 		if marshalErr != nil {
 			return nil, ErrInvalidPrivateKey
 		}
+
 		return pem.EncodeToMemory(&pem.Block{Type: pemTypePrivateKey, Bytes: der}), nil
 	}
 
@@ -261,9 +285,11 @@ func decodeKeyPEM(block *pem.Block, keyPassword string) (plaintext []byte, err e
 	if err != nil {
 		return nil, err
 	}
+
 	if encrypted {
 		return decrypted, nil
 	}
+
 	return pem.EncodeToMemory(block), nil
 }
 
@@ -421,6 +447,7 @@ type clientCertificateSource interface {
 func ClientTLSConfig(src clientCertificateSource, serverName string) *tls.Config {
 	cfg := DefaultClientTLSConfigStrict(serverName)
 	cfg.GetClientCertificate = src.GetClientCertificate
+
 	return cfg
 }
 
@@ -474,14 +501,17 @@ func decryptLegacyPEMKey(block *pem.Block, keyPassword string) (pemKey []byte, e
 	if !x509.IsEncryptedPEMBlock(block) { //nolint:staticcheck // SA1019: required for legacy PEM support
 		return nil, false, nil
 	}
+
 	if keyPassword == "" {
 		return nil, false, ErrPasswordRequired
 	}
+
 	buf, err := x509.DecryptPEMBlock(block, []byte(keyPassword)) //nolint:staticcheck // SA1019: required for legacy PEM support
 	if err != nil {
 		if errors.Is(err, x509.IncorrectPasswordError) { //nolint:staticcheck // SA1019: required for legacy PEM support
 			return nil, false, ErrIncorrectPassword
 		}
+
 		return nil, false, ErrInvalidPrivateKey
 	}
 
@@ -489,6 +519,7 @@ func decryptLegacyPEMKey(block *pem.Block, keyPassword string) (pemKey []byte, e
 	if err := pem.Encode(&encoded, &pem.Block{Type: block.Type, Bytes: buf}); err != nil {
 		return nil, false, ErrInvalidPrivateKey
 	}
+
 	return encoded.Bytes(), true, nil
 }
 
@@ -552,13 +583,16 @@ func ApplyMinTLSVersion(tlsConfig *tls.Config, raw string) error {
 	if raw == "" {
 		return nil
 	}
+
 	v, ok := ResolveMinTLSVersion(raw)
 	if !ok {
 		return fmt.Errorf("unknown TLS version %q: supported values are 1.2, 1.3", raw)
 	}
+
 	tlsConfig.MinVersion = v
 	if v == tls.VersionTLS13 {
 		tlsConfig.CipherSuites = nil
 	}
+
 	return nil
 }

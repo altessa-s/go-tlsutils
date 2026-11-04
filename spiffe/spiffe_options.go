@@ -29,6 +29,7 @@ func WithAuthorizer(a tlsconfig.Authorizer) Option {
 		if a == nil {
 			return
 		}
+
 		o.authorizer = a
 	}
 }

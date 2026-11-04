@@ -66,13 +66,17 @@ func New(ctx context.Context, opts ...Option) (*Provider, error) {
 	if o.authorizer == nil {
 		return nil, ErrNoAuthorizer
 	}
+
 	var clientOpts []workloadapi.X509SourceOption
+
 	clientOpts = coreslices.AppendIf[workloadapi.X509SourceOption](clientOpts, o.socketPath != "",
 		workloadapi.WithClientOptions(workloadapi.WithAddr(o.socketPath)))
+
 	src, err := workloadapi.NewX509Source(ctx, clientOpts...)
 	if err != nil {
 		return nil, coreerrs.Wrap(err, "spiffe: create X509 source")
 	}
+
 	return &Provider{source: src, authorizer: o.authorizer}, nil
 }
 
@@ -82,9 +86,11 @@ func NewProvider(source Source, authorizer tlsconfig.Authorizer) (*Provider, err
 	if source == nil {
 		return nil, ErrNoSource
 	}
+
 	if authorizer == nil {
 		return nil, ErrNoAuthorizer
 	}
+
 	return &Provider{source: source, authorizer: authorizer}, nil
 }
 
@@ -120,8 +126,10 @@ func (p *Provider) HTTPTransport() *http.Transport {
 	if !ok {
 		base = &http.Transport{}
 	}
+
 	t := base.Clone()
 	t.DialTLSContext = p.DialContext
+
 	return t
 }
 

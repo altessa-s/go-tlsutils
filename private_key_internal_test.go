@@ -30,6 +30,7 @@ func TestPrivateKeyScryptValidationBoundary(t *testing.T) {
 			marshal := func(value any) []byte {
 				der, err := asn1.Marshal(value)
 				require.NoError(t, err)
+
 				return der
 			}
 			kdf := marshal(struct {
@@ -59,6 +60,7 @@ func TestPrivateKeyScryptValidationBoundary(t *testing.T) {
 				},
 				Data: make([]byte, 16),
 			})
+
 			err := validatePrivateKeyKDF(envelope)
 			if tc.want == nil {
 				require.NoError(t, err)
@@ -73,6 +75,7 @@ func TestPrivateKeyCipherValidation(t *testing.T) {
 	// Exercise validatePrivateKeyKDF directly: errors here must precede both
 	// decryption and the decoder's last-resort panic recovery.
 	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+
 	for _, cipher := range []pkcs8.Cipher{
 		pkcs8.AES128CBC, pkcs8.AES192CBC, pkcs8.AES256CBC,
 		pkcs8.AES128GCM, pkcs8.AES192GCM, pkcs8.AES256GCM, pkcs8.TripleDESCBC,
@@ -83,12 +86,15 @@ func TestPrivateKeyCipherValidation(t *testing.T) {
 				KDFOpts: pkcs8.PBKDF2Opts{SaltSize: 16, IterationCount: 1, HMACHash: crypto.SHA256},
 			})
 			require.NoError(t, err)
+
 			var original struct {
 				Algorithm pkix.AlgorithmIdentifier
 				Data      []byte
 			}
+
 			_, err = asn1.Unmarshal(der, &original)
 			require.NoError(t, err)
+
 			for _, tc := range []struct {
 				name           string
 				ivLen, dataLen int
@@ -102,17 +108,22 @@ func TestPrivateKeyCipherValidation(t *testing.T) {
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					info := original
+
 					var params struct{ KDF, Cipher pkix.AlgorithmIdentifier }
+
 					_, err := asn1.Unmarshal(info.Algorithm.Parameters.FullBytes, &params)
 					require.NoError(t, err)
 					iv, err := asn1.Marshal(make([]byte, tc.ivLen))
 					require.NoError(t, err)
+
 					params.Cipher.Parameters = asn1.RawValue{FullBytes: iv}
 					info.Algorithm.Parameters.FullBytes, err = asn1.Marshal(params)
 					require.NoError(t, err)
+
 					info.Data = make([]byte, tc.dataLen)
 					encoded, err := asn1.Marshal(info)
 					require.NoError(t, err)
+
 					err = validatePrivateKeyKDF(encoded)
 					if tc.valid {
 						require.NoError(t, err)

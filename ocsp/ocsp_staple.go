@@ -37,6 +37,7 @@ func resolveFailureMode(stapler tlsutils.OCSPStapler) FailureMode {
 	if fma, ok := stapler.(FailureModeReporter); ok {
 		return fma.FailureMode()
 	}
+
 	return FailureModeSoft
 }
 
@@ -54,6 +55,7 @@ func stapleOrEnforce(ctx context.Context, stapler tlsutils.OCSPStapler, cert *tl
 		if err != nil {
 			return nil, coreerrs.WrapOperation(err, "ocsp staple required (hard-fail mode)")
 		}
+
 		return nil, errors.New("ocsp staple required (hard-fail mode): empty response")
 	}
 
@@ -72,6 +74,7 @@ func StapleCertificate(ctx context.Context, stapler tlsutils.OCSPStapler, cert *
 	if stapler == nil || cert == nil {
 		return cert, nil
 	}
+
 	return stapleOrEnforce(ctx, stapler, cert)
 }
 
@@ -160,6 +163,7 @@ func StapleOCSPToConfig(config *tls.Config, stapler tlsutils.OCSPStapler) error 
 					return &statics[i], nil
 				}
 			}
+
 			return new(tls.Certificate), nil
 		}
 	}
@@ -194,8 +198,10 @@ func selectServerCertificate(
 		if cert, ok := nameToCert.Get(name); ok {
 			return cert, nil
 		}
+
 		if name != "" {
 			labels := strings.Split(name, ".")
+
 			labels[0] = "*"
 			if cert, ok := nameToCert.Get(strings.Join(labels, ".")); ok {
 				return cert, nil
@@ -208,5 +214,6 @@ func selectServerCertificate(
 			return &statics[i], nil
 		}
 	}
+
 	return &statics[0], nil
 }

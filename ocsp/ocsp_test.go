@@ -94,6 +94,7 @@ func TestRemoveExpiredEntries(t *testing.T) {
 
 	_, hasExpired := s.cache["expired"]
 	require.False(t, hasExpired, "expired entry should have been removed")
+
 	_, hasValid := s.cache["valid"]
 	require.True(t, hasValid, "valid entry should still exist")
 }

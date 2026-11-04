@@ -36,26 +36,32 @@ type countingResponder struct {
 
 func newCountingResponder(t testing.TB, ca *testhelpers.CA, nextUpdate time.Duration) *countingResponder {
 	t.Helper()
+
 	r := &countingResponder{}
 	r.status.Store(int32(xocsp.Good))
 	r.nextUpdate.Store(int64(nextUpdate))
 	r.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		r.hits.Add(1)
+
 		if r.fail.Load() {
 			http.Error(w, "down", http.StatusInternalServerError)
 			return
 		}
+
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
 		parsed, err := xocsp.ParseRequest(body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
 		now := time.Now()
+
 		resp := xocsp.Response{
 			Status:       int(r.status.Load()),
 			SerialNumber: parsed.SerialNumber,
@@ -65,14 +71,17 @@ func newCountingResponder(t testing.TB, ca *testhelpers.CA, nextUpdate time.Dura
 		if resp.Status == xocsp.Revoked {
 			resp.RevokedAt = now.Add(-time.Hour)
 		}
+
 		der, err := xocsp.CreateResponse(ca.Cert, ca.Cert, resp, ca.Key)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		_, _ = w.Write(der)
 	}))
 	t.Cleanup(r.srv.Close)
+
 	return r
 }
 
@@ -80,6 +89,7 @@ func chainWith(t testing.TB, ca *testhelpers.CA, urls ...string) *tls.Certificat
 	t.Helper()
 	leaf := ca.SignLeaf(t, testhelpers.WithOCSPServers(urls...))
 	leaf.Certificate = append(leaf.Certificate, ca.Cert.Raw)
+
 	return &leaf
 }
 
@@ -127,6 +137,7 @@ func TestNeedsRefreshAndRunRefreshCycle(t *testing.T) {
 
 	// A malformed leaf cannot be refreshed.
 	bad := &tls.Certificate{Certificate: [][]byte{[]byte("junk")}}
+
 	s.mu.Lock()
 	s.cache[cacheKeyOf(bad)] = &ocspCacheEntry{nextUpdate: time.Now()}
 	s.mu.Unlock()
@@ -152,11 +163,13 @@ func TestRunRefreshAll_RefreshesCachedAndJoinsErrors(t *testing.T) {
 	require.NoError(t, err)
 
 	s.mu.RLock()
+
 	for _, e := range s.cache {
 		e.mu.Lock()
 		e.nextUpdate = time.Now().Add(time.Minute)
 		e.mu.Unlock()
 	}
+
 	s.mu.RUnlock()
 	flaky.fail.Store(true)
 
@@ -178,11 +191,13 @@ func TestRefreshAllFunc_RefreshesCache(t *testing.T) {
 	_, err := s.GetOCSPStaple(t.Context(), cert)
 	require.NoError(t, err)
 	s.mu.RLock()
+
 	for _, e := range s.cache {
 		e.mu.Lock()
 		e.nextUpdate = time.Now().Add(time.Minute)
 		e.mu.Unlock()
 	}
+
 	s.mu.RUnlock()
 
 	fn := s.RefreshAllFunc()
@@ -192,11 +207,13 @@ func TestRefreshAllFunc_RefreshesCache(t *testing.T) {
 	s.MarkSchedulerManaged()
 	require.ErrorIs(t, s.RunRefreshAll(t.Context()), ErrSchedulerManaged)
 	s.mu.RLock()
+
 	for _, e := range s.cache {
 		e.mu.Lock()
 		e.nextUpdate = time.Now().Add(time.Minute)
 		e.mu.Unlock()
 	}
+
 	s.mu.RUnlock()
 	require.NoError(t, fn(t.Context()))
 	require.Equal(t, int32(3), r.hits.Load(), "the scheduler func still refreshes the cache")
@@ -222,6 +239,7 @@ type gatedTransport struct {
 func (g *gatedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	g.once.Do(func() { close(g.entered) })
 	<-g.release
+
 	return http.DefaultTransport.RoundTrip(r)
 }
 
@@ -234,12 +252,16 @@ func TestGetOCSPStaple_SharesConcurrentFetch(t *testing.T) {
 	s := NewOCSPStapler(WithHTTPClient(&http.Client{Transport: gate}))
 
 	const callers = 16
+
 	var wg sync.WaitGroup
+
 	staples := make([][]byte, callers)
+
 	errs := make([]error, callers)
 	for i := range callers {
 		wg.Go(func() { staples[i], errs[i] = s.GetOCSPStaple(t.Context(), cert) })
 	}
+
 	<-gate.entered
 	close(gate.release)
 	wg.Wait()
@@ -248,6 +270,7 @@ func TestGetOCSPStaple_SharesConcurrentFetch(t *testing.T) {
 		require.NoError(t, errs[i])
 		require.Equal(t, staples[0], staples[i])
 	}
+
 	require.Equal(t, int32(1), r.hits.Load(), "concurrent cache misses share one fetch")
 }
 
@@ -261,20 +284,27 @@ func TestGetOCSPStaple_SharedFetchKeepsCallerDeadline(t *testing.T) {
 	cert := chainWith(t, ca, r.srv.URL)
 
 	gate := &gatedTransport{entered: make(chan struct{}), release: make(chan struct{})}
+
 	t.Cleanup(func() { close(gate.release) })
+
 	s := NewOCSPStapler(WithHTTPClient(&http.Client{Transport: gate}))
+
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
+
 	_, err := s.GetOCSPStaple(ctx, cert)
 	require.ErrorIs(t, err, context.DeadlineExceeded, "the caller stops waiting at its own deadline")
 
 	var seen time.Time
+
 	ok := NewOCSPStapler(WithHTTPClient(&http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		seen, _ = req.Context().Deadline()
 		return http.DefaultTransport.RoundTrip(req)
 	})}))
+
 	ctx, cancel = context.WithTimeout(t.Context(), time.Hour)
 	defer cancel()
+
 	deadline, _ := ctx.Deadline()
 	_, err = ok.GetOCSPStaple(ctx, cert)
 	require.NoError(t, err)
@@ -283,7 +313,7 @@ func TestGetOCSPStaple_SharedFetchKeepsCallerDeadline(t *testing.T) {
 
 // TestGetOCSPStaple_CancelledFirstCallerRetiresFetch pins that a shared fetch
 // never outlives the caller that started it: with no deadline and an HTTP
-// client without a timeout, cancelling that caller ends the stalled request,
+// client without a timeout, canceling that caller ends the stalled request,
 // and a later caller gets a fresh fetch instead of joining a stranded one.
 func TestGetOCSPStaple_CancelledFirstCallerRetiresFetch(t *testing.T) {
 	t.Parallel()
@@ -292,22 +322,28 @@ func TestGetOCSPStaple_CancelledFirstCallerRetiresFetch(t *testing.T) {
 	cert := chainWith(t, ca, r.srv.URL)
 
 	entered := make(chan struct{})
+
 	var stalled atomic.Bool
+
 	s := NewOCSPStapler(WithHTTPClient(&http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if stalled.CompareAndSwap(false, true) {
 			close(entered) // the responder stalls on the first request
 			<-req.Context().Done()
+
 			return nil, req.Context().Err()
 		}
+
 		return http.DefaultTransport.RoundTrip(req)
 	})}))
 
 	ctx, cancel := context.WithCancel(t.Context())
 	errc := make(chan error, 1)
+
 	go func() {
 		_, err := s.GetOCSPStaple(ctx, cert)
 		errc <- err
 	}()
+
 	<-entered
 	cancel()
 	require.ErrorIs(t, <-errc, context.Canceled)
@@ -327,6 +363,7 @@ func TestFetch_RetryAndFallbackServers(t *testing.T) {
 	ca := testhelpers.NewCA(t)
 	down := newCountingResponder(t, ca, 3*time.Hour)
 	down.fail.Store(true)
+
 	up := newCountingResponder(t, ca, 3*time.Hour)
 	tr := &countingTransport{}
 
@@ -373,6 +410,7 @@ func TestFetch_Failures(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
+
 	_, err = s.GetOCSPStaple(ctx, chainWith(t, ca, r.srv.URL))
 	require.ErrorIs(t, err, context.Canceled)
 }

@@ -33,8 +33,10 @@ func (s *Stapler) fetchOCSPResponse(ctx context.Context, cert *tls.Certificate, 
 
 	// Find issuer certificate
 	var issuerCert *x509.Certificate
+
 	if len(cert.Certificate) > 1 {
 		var err error
+
 		issuerCert, err = x509.ParseCertificate(cert.Certificate[1])
 		if err != nil {
 			return nil, time.Time{}, coreerrs.WrapOperation(err, "parse issuer certificate")
@@ -49,8 +51,10 @@ func (s *Stapler) fetchOCSPResponse(ctx context.Context, cert *tls.Certificate, 
 		return nil, time.Time{}, coreerrs.WrapOperation(err, "create OCSP request")
 	}
 
-	var ocspResp []byte
-	var parsedResp *ocsp.Response
+	var (
+		ocspResp   []byte
+		parsedResp *ocsp.Response
+	)
 
 	// Try each OCSP server with retry policy
 	for i, ocspURL := range leafCert.OCSPServer {
@@ -70,7 +74,9 @@ func (s *Stapler) fetchOCSPResponse(ctx context.Context, cert *tls.Certificate, 
 
 		requestFunc := func() error {
 			var err error
+
 			ocspResp, parsedResp, err = s.requestOCSP(ctx, ocspURL, ocspReq, leafCert, issuerCert)
+
 			return err
 		}
 
@@ -97,6 +103,7 @@ func (s *Stapler) fetchOCSPResponse(ctx context.Context, cert *tls.Certificate, 
 		s.logger.ErrorContext(ctx, "failed to get OCSP response",
 			slog.String("url", ocspURL),
 			slog.Any("error", retryErr))
+
 		if i == len(leafCert.OCSPServer)-1 {
 			// Last server failed
 			return nil, time.Time{}, coreerrs.WrapOperation(retryErr, "fetch from all OCSP servers")
@@ -122,6 +129,7 @@ func (s *Stapler) fetchOCSPResponse(ctx context.Context, cert *tls.Certificate, 
 		// If no next update or too far in the future, refresh in 24 hours
 		nextUpdate = now.Add(DefaultOCSPExpiry)
 	}
+
 	if parsedResp.NextUpdate.IsZero() {
 		// A response without a nextUpdate is only trusted until thisUpdate plus
 		// the maximum response age; never serve it from cache past that.
@@ -143,6 +151,7 @@ func (s *Stapler) requestOCSP(
 	if err != nil {
 		return nil, nil, coreerrs.WrapOperation(err, "create HTTP request")
 	}
+
 	httpReq.Header.Set("Content-Type", "application/ocsp-request")
 
 	// Request gzip compression if enabled
@@ -171,6 +180,7 @@ func (s *Stapler) requestOCSP(
 				return nil, nil, coreerrs.WrapOperation(gzipErr, "create gzip reader for OCSP response")
 			}
 			defer gzipReader.Close() //nolint:errcheck
+
 			responseBody = gzipReader
 
 			s.logger.DebugContext(ctx, "received gzip-compressed OCSP response")
@@ -181,6 +191,7 @@ func (s *Stapler) requestOCSP(
 	if err != nil {
 		return ocspResp, nil, coreerrs.WrapOperation(err, "read OCSP response")
 	}
+
 	if len(ocspResp) > maxOCSPResponseSize {
 		return ocspResp, nil, fmt.Errorf("OCSP response exceeds %d bytes", maxOCSPResponseSize)
 	}
@@ -202,12 +213,15 @@ func checkFreshness(resp *ocsp.Response, now time.Time, maxAge time.Duration) er
 	if resp.ThisUpdate.After(now.Add(ocspClockSkew)) {
 		return fmt.Errorf("%w: thisUpdate %s is in the future", ErrStaleResponse, resp.ThisUpdate.Format(time.RFC3339))
 	}
+
 	if !resp.NextUpdate.IsZero() && now.After(resp.NextUpdate.Add(ocspClockSkew)) {
 		return fmt.Errorf("%w: nextUpdate %s has passed", ErrStaleResponse, resp.NextUpdate.Format(time.RFC3339))
 	}
+
 	if resp.NextUpdate.IsZero() && now.After(resp.ThisUpdate.Add(maxAge+ocspClockSkew)) {
 		return fmt.Errorf("%w: thisUpdate %s is older than the maximum response age %s without a nextUpdate",
 			ErrStaleResponse, resp.ThisUpdate.Format(time.RFC3339), maxAge)
 	}
+
 	return nil
 }

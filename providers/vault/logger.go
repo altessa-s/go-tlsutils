@@ -42,6 +42,7 @@ func (p *attrPool) get() *[]slog.Attr {
 		slice := make([]slog.Attr, 0, 10)
 		return &slice
 	}
+
 	return attrs
 }
 
@@ -125,6 +126,7 @@ func (l *Logger) logWithLevel(level slog.Level, msg string, fields ...map[string
 	// Get attributes from pool
 	attrsPtr := l.pool.get()
 	defer l.pool.put(attrsPtr)
+
 	attrs := *attrsPtr
 
 	// Convert fields to attributes using slog.Any for better performance

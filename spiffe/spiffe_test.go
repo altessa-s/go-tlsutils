@@ -52,6 +52,7 @@ func TestNewRequiresAuthorizer(t *testing.T) {
 
 func TestMTLSServerConfig(t *testing.T) {
 	t.Parallel()
+
 	p, err := spiffe.NewProvider(&fakeSource{}, anyAuthorizer())
 	require.NoError(t, err)
 
@@ -64,6 +65,7 @@ func TestMTLSServerConfig(t *testing.T) {
 
 func TestMTLSClientConfig(t *testing.T) {
 	t.Parallel()
+
 	p, err := spiffe.NewProvider(&fakeSource{}, anyAuthorizer())
 	require.NoError(t, err)
 
@@ -77,6 +79,7 @@ func TestMTLSClientConfig(t *testing.T) {
 
 func TestHTTPTransport(t *testing.T) {
 	t.Parallel()
+
 	p, err := spiffe.NewProvider(&fakeSource{}, anyAuthorizer())
 	require.NoError(t, err)
 
@@ -87,6 +90,7 @@ func TestHTTPTransport(t *testing.T) {
 
 func TestGRPCCredentials(t *testing.T) {
 	t.Parallel()
+
 	p, err := spiffe.NewProvider(&fakeSource{}, anyAuthorizer())
 	require.NoError(t, err)
 
@@ -101,6 +105,7 @@ func TestGRPCCredentials(t *testing.T) {
 
 func TestClose(t *testing.T) {
 	t.Parallel()
+
 	src := &fakeSource{}
 	p, err := spiffe.NewProvider(src, anyAuthorizer())
 	require.NoError(t, err)

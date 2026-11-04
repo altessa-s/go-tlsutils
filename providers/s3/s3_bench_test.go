@@ -16,6 +16,7 @@ func BenchmarkNew(b *testing.B) {
 	client, _, _ := newMockClient(b)
 
 	b.ResetTimer()
+
 	for b.Loop() {
 		p, err := tlss3.New("my-bucket", "certs/server.crt", "certs/server.key", "",
 			tlss3.WithS3Client(client),
@@ -24,6 +25,7 @@ func BenchmarkNew(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+
 		p.Close(b.Context())
 	}
 }
@@ -41,6 +43,7 @@ func BenchmarkTLSConfig(b *testing.B) {
 	defer p.Close(b.Context())
 
 	b.ResetTimer()
+
 	for b.Loop() {
 		_, _ = p.TLSConfig()
 	}
@@ -62,10 +65,12 @@ func BenchmarkTLSConfig_Parallel(b *testing.B) {
 		b.Fatal(err)
 	}
 	defer p.Close(b.Context())
+
 	<-notify // drain the initial load notification
 
 	stop := make(chan struct{})
 	defer close(stop)
+
 	go func() {
 		for i := 0; ; i++ {
 			select {
@@ -73,7 +78,9 @@ func BenchmarkTLSConfig_Parallel(b *testing.B) {
 				return
 			default:
 			}
+
 			client.SetObject("certs/server.crt", &mockObject{data: certPEM, etag: fmt.Sprintf(`"etag-%d"`, i)})
+
 			select {
 			case <-notify:
 			case <-stop:
@@ -104,6 +111,7 @@ func BenchmarkType(b *testing.B) {
 	defer p.Close(b.Context())
 
 	b.ResetTimer()
+
 	for b.Loop() {
 		_ = p.Type()
 	}

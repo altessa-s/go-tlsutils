@@ -25,6 +25,7 @@ import (
 // client leaf (or the handshake error).
 func mtlsServer(tb testing.TB, serverCert tls.Certificate, clientCAs *x509.CertPool) (addr string, result <-chan mtlsResult) {
 	tb.Helper()
+
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = ln.Close() })
@@ -36,6 +37,7 @@ func mtlsServer(tb testing.TB, serverCert tls.Certificate, clientCAs *x509.CertP
 		ClientCAs:    clientCAs,
 	}
 	ch := make(chan mtlsResult, 1)
+
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -43,15 +45,19 @@ func mtlsServer(tb testing.TB, serverCert tls.Certificate, clientCAs *x509.CertP
 			return
 		}
 		defer func() { _ = conn.Close() }()
+
 		_ = conn.SetDeadline(time.Now().Add(handshakeDeadline))
+
 		srv := tls.Server(conn, cfg)
 		if err := srv.HandshakeContext(tb.Context()); err != nil {
 			ch <- mtlsResult{err: err}
 			return
 		}
+
 		_, err = srv.Write([]byte("ok"))
 		ch <- mtlsResult{peer: srv.ConnectionState().PeerCertificates, err: err}
 	}()
+
 	return ln.Addr().String(), ch
 }
 
@@ -64,15 +70,20 @@ type mtlsResult struct {
 // Under TLS 1.3 a rejected client certificate surfaces on this first read.
 func dialAndRead(tb testing.TB, addr string, cfg *tls.Config) error {
 	tb.Helper()
+
 	d := tls.Dialer{Config: cfg}
+
 	conn, err := d.DialContext(tb.Context(), "tcp", addr)
 	if err != nil {
 		return err
 	}
+
 	defer func() { _ = conn.Close() }()
+
 	_ = conn.SetDeadline(time.Now().Add(handshakeDeadline))
 	buf := make([]byte, 2)
 	_, err = io.ReadFull(conn, buf)
+
 	return err
 }
 
@@ -95,6 +106,7 @@ func TestMutualTLS_FileProviderClientCertificate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			serverPKI := newTestPKI(t)
+
 			clientPKI := serverPKI
 			if !tc.trustClient {
 				clientPKI = newTestPKI(t)
@@ -111,12 +123,15 @@ func TestMutualTLS_FileProviderClientCertificate(t *testing.T) {
 			clientCfg.RootCAs = serverPKI.root.Pool
 
 			clientErr := dialAndRead(t, addr, clientCfg)
+
 			res := <-result
 			if !tc.trustClient {
 				require.Error(t, res.err, "the server must reject a client certificate from an untrusted CA")
 				require.Error(t, clientErr)
+
 				return
 			}
+
 			require.NoError(t, clientErr)
 			require.NoError(t, res.err)
 			require.Len(t, res.peer, 2, "the client presents leaf and intermediate")

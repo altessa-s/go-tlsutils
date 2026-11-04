@@ -56,6 +56,7 @@ func TestDefaultTLSConfig(t *testing.T) {
 
 func TestDefaultTLSConfig_CipherSuitesAreCopies(t *testing.T) {
 	t.Parallel()
+
 	want := slices.Clone(tlsutils.DefaultTLSConfig().CipherSuites)
 
 	clear(tlsutils.DefaultTLSConfig().CipherSuites)
@@ -101,6 +102,7 @@ func TestDialContext(t *testing.T) {
 	if conn != nil {
 		_ = conn.Close()
 	}
+
 	var verifyErr *tls.CertificateVerificationError
 	require.ErrorAs(t, err, &verifyErr)
 }
@@ -130,6 +132,7 @@ func TestBuildCAPool_SystemOnly(t *testing.T) {
 	if err != nil {
 		t.Skipf("system cert pool not available: %v", err)
 	}
+
 	require.NotNil(t, pool)
 }
 

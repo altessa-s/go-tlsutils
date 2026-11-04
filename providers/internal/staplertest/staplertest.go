@@ -41,7 +41,9 @@ func (s *CountingStapler) Calls() int32 { return s.calls.Load() }
 // server config and returns the OCSP response the client received.
 func Handshake(tb testing.TB, cfg *tls.Config) []byte {
 	tb.Helper()
+
 	serverConn, clientConn := net.Pipe()
+
 	tb.Cleanup(func() {
 		_ = serverConn.Close()
 		_ = clientConn.Close()
@@ -62,8 +64,10 @@ func Handshake(tb testing.TB, cfg *tls.Config) []byte {
 	if err := client.HandshakeContext(tb.Context()); err != nil {
 		tb.Fatalf("client handshake: %v", err)
 	}
+
 	if err := <-serverErr; err != nil {
 		tb.Fatalf("server handshake: %v", err)
 	}
+
 	return client.ConnectionState().OCSPResponse
 }

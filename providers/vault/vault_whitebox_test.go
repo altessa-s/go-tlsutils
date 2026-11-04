@@ -19,6 +19,7 @@ import (
 // package's shared globalAttrPool) so the test needs no serialization.
 func TestAttrPool_GetFallbackOnTypeMismatch(t *testing.T) {
 	t.Parallel()
+
 	pool := newAttrPool()
 	pool.pool.Put("not a []slog.Attr") // wrong type: forces the type-assertion fallback.
 
@@ -41,6 +42,7 @@ func (c *ctxCloser) SetToken(context.Context, *vaultApi.Client) error { return n
 func (c *ctxCloser) Close(ctx context.Context) error {
 	c.called = true
 	c.gotCtx = ctx
+
 	return c.closeErr
 }
 
@@ -51,6 +53,7 @@ func (c *ctxCloser) Close(ctx context.Context) error {
 // reachable via a white-box construction of Vault.
 func TestVault_Close_PrefersContextCloser(t *testing.T) {
 	t.Parallel()
+
 	cc := &ctxCloser{}
 	v := &Vault{authMethod: cc}
 

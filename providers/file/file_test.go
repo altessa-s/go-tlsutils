@@ -39,6 +39,7 @@ func TestNewWithCertAndKey_ValidCert(t *testing.T) {
 	certPath, keyPath := testhelpers.WriteTempCertFiles(t, certPEM, keyPEM)
 
 	f, err := tlsfile.NewWithCertAndKey(certPath, keyPath, "")
+
 	require.NoError(t, err)
 	defer f.Close(t.Context())
 
@@ -67,6 +68,7 @@ func TestFile_TLSConfig(t *testing.T) {
 	certPath, keyPath := testhelpers.WriteTempCertFiles(t, certPEM, keyPEM)
 
 	f, err := tlsfile.NewWithCertAndKey(certPath, keyPath, "")
+
 	require.NoError(t, err)
 	defer f.Close(t.Context())
 
@@ -81,6 +83,7 @@ func TestFile_TLSConfig_ReturnsCopy(t *testing.T) {
 	certPath, keyPath := testhelpers.WriteTempCertFiles(t, certPEM, keyPEM)
 
 	f, err := tlsfile.NewWithCertAndKey(certPath, keyPath, "")
+
 	require.NoError(t, err)
 	defer f.Close(t.Context())
 
@@ -146,6 +149,7 @@ func TestFile_Type(t *testing.T) {
 	certPath, keyPath := testhelpers.WriteTempCertFiles(t, certPEM, keyPEM)
 
 	f, err := tlsfile.NewWithCertAndKey(certPath, keyPath, "")
+
 	require.NoError(t, err)
 	defer f.Close(t.Context())
 

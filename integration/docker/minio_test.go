@@ -90,13 +90,16 @@ func TestMinIOProvider(t *testing.T) {
 		if err != nil {
 			return false
 		}
+
 		st, err := tryHandshake(ctx, cfg, clientConfig(roots))
+
 		return err == nil && st.PeerCertificates[0].SerialNumber.Cmp(second.SerialNumber) == 0
 	}, 15*time.Second, 100*time.Millisecond, "provider did not reload the overwritten certificate")
 }
 
 func putObject(tb testing.TB, ctx context.Context, client *s3.Client, key string, body []byte) {
 	tb.Helper()
+
 	_, err := client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(minioBucket),
 		Key:    aws.String(key),

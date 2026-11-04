@@ -27,12 +27,15 @@ import (
 // connection state and the client-side handshake error.
 func handshakeNoSNI(t *testing.T, server, client *tls.Config) (tls.ConnectionState, error) {
 	t.Helper()
+
 	cConn, sConn := net.Pipe()
 	srv := tls.Server(sConn, server)
 	cli := tls.Client(cConn, client)
+
 	srvDone := make(chan struct{})
 	go func() {
 		defer close(srvDone)
+
 		_ = srv.HandshakeContext(t.Context())
 		// Close the raw pipe, not the TLS conn: a TLS close_notify would block on
 		// the synchronous pipe. This also unblocks the client on a server abort.
@@ -42,7 +45,9 @@ func handshakeNoSNI(t *testing.T, server, client *tls.Config) (tls.ConnectionSta
 	err := cli.HandshakeContext(t.Context())
 	state := cli.ConnectionState()
 	_ = cConn.Close()
+
 	<-srvDone
+
 	return state, err
 }
 
@@ -113,6 +118,7 @@ func rsaCert(t *testing.T) tls.Certificate {
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	require.NoError(t, err)
+
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }
 
@@ -180,6 +186,7 @@ func TestSelectServerCertificate(t *testing.T) {
 
 	t.Run("callback returning nil falls back to the static certificates", func(t *testing.T) {
 		t.Parallel()
+
 		getCert := func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return nil, nil } //nolint:nilnil // crypto/tls contract
 		got, err := selectServerCertificate(&tls.ClientHelloInfo{ServerName: "x"}, getCert, statics[:1], nil)
 		require.NoError(t, err)
@@ -188,6 +195,7 @@ func TestSelectServerCertificate(t *testing.T) {
 
 	t.Run("callback is skipped without SNI when static certificates exist", func(t *testing.T) {
 		t.Parallel()
+
 		getCert := func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &rsa, nil }
 		got, err := selectServerCertificate(&tls.ClientHelloInfo{}, getCert, statics[:1], nil)
 		require.NoError(t, err)
@@ -196,6 +204,7 @@ func TestSelectServerCertificate(t *testing.T) {
 
 	t.Run("name map matches a lowercased wildcard", func(t *testing.T) {
 		t.Parallel()
+
 		names := coremaps.NewImmutableMap(map[string]*tls.Certificate{"*.example.org": &statics[1]})
 		got, err := selectServerCertificate(&tls.ClientHelloInfo{ServerName: "API.Example.org"}, nil, statics, names)
 		require.NoError(t, err)
@@ -204,6 +213,7 @@ func TestSelectServerCertificate(t *testing.T) {
 
 	t.Run("name map matches the exact lowercased name", func(t *testing.T) {
 		t.Parallel()
+
 		names := coremaps.NewImmutableMap(map[string]*tls.Certificate{"api.example.org": &statics[1]})
 		got, err := selectServerCertificate(&tls.ClientHelloInfo{ServerName: "API.Example.ORG"}, nil, statics, names)
 		require.NoError(t, err)
@@ -212,6 +222,7 @@ func TestSelectServerCertificate(t *testing.T) {
 
 	t.Run("no certificates", func(t *testing.T) {
 		t.Parallel()
+
 		_, err := selectServerCertificate(&tls.ClientHelloInfo{}, nil, nil, nil)
 		require.Error(t, err)
 	})

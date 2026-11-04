@@ -41,6 +41,7 @@ type mockObject struct {
 func (m *mockS3Client) SetObject(key string, obj *mockObject) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.objects[key] = obj
 }
 
@@ -51,10 +52,12 @@ func (m *mockS3Client) GetObject(_ context.Context, input *s3.GetObjectInput, _ 
 	if m.getErr != nil {
 		return nil, m.getErr
 	}
+
 	obj, ok := m.objects[*input.Key]
 	if !ok {
 		return nil, &s3types.NotFound{}
 	}
+
 	return &s3.GetObjectOutput{
 		Body: io.NopCloser(bytes.NewReader(obj.data)),
 		ETag: aws.String(obj.etag),
@@ -68,10 +71,12 @@ func (m *mockS3Client) HeadObject(_ context.Context, input *s3.HeadObjectInput, 
 	if m.headErr != nil {
 		return nil, m.headErr
 	}
+
 	obj, ok := m.objects[*input.Key]
 	if !ok {
 		return nil, &s3types.NotFound{}
 	}
+
 	return &s3.HeadObjectOutput{
 		ETag: aws.String(obj.etag),
 	}, nil
@@ -90,9 +95,11 @@ func (m *sseCapturingClient) GetObject(ctx context.Context, input *s3.GetObjectI
 	if input.SSECustomerAlgorithm != nil {
 		m.getSSEAlgorithm.Store(input.SSECustomerAlgorithm)
 	}
+
 	if input.SSECustomerKey != nil {
 		m.getSSEKey.Store(input.SSECustomerKey)
 	}
+
 	return m.mockS3Client.GetObject(ctx, input, opts...)
 }
 
@@ -100,9 +107,11 @@ func (m *sseCapturingClient) HeadObject(ctx context.Context, input *s3.HeadObjec
 	if input.SSECustomerAlgorithm != nil {
 		m.headSSEAlgorithm.Store(input.SSECustomerAlgorithm)
 	}
+
 	if input.SSECustomerKey != nil {
 		m.headSSEKey.Store(input.SSECustomerKey)
 	}
+
 	return m.mockS3Client.HeadObject(ctx, input, opts...)
 }
 
@@ -115,6 +124,7 @@ func newMockClient(tb testing.TB) (*mockS3Client, []byte, []byte) {
 			"certs/server.key": {data: keyPEM, etag: `"etag-key-1"`},
 		},
 	}
+
 	return client, certPEM, keyPEM
 }
 
@@ -140,6 +150,7 @@ func TestNew_ValidCert(t *testing.T) {
 		tlss3.WithS3Client(client),
 		tlss3.WithPollInterval(time.Hour),
 	)
+
 	require.NoError(t, err)
 	defer p.Close(t.Context())
 
@@ -153,6 +164,7 @@ func TestS3_TLSConfig(t *testing.T) {
 		tlss3.WithS3Client(client),
 		tlss3.WithPollInterval(time.Hour),
 	)
+
 	require.NoError(t, err)
 	defer p.Close(t.Context())
 
@@ -169,6 +181,7 @@ func TestS3_TLSConfig_ReturnsCopy(t *testing.T) {
 		tlss3.WithS3Client(client),
 		tlss3.WithPollInterval(time.Hour),
 	)
+
 	require.NoError(t, err)
 	defer p.Close(t.Context())
 
@@ -188,6 +201,7 @@ func TestS3_PollDetectsETagChange(t *testing.T) {
 		tlss3.WithPollInterval(50*time.Millisecond),
 		tlss3.WithReloadNotifyChan(notifyCh),
 	)
+
 	require.NoError(t, err)
 	defer p.Close(t.Context())
 
@@ -221,6 +235,7 @@ func TestS3_PollSameETag_NoReload(t *testing.T) {
 		tlss3.WithPollInterval(50*time.Millisecond),
 		tlss3.WithReloadNotifyChan(notifyCh),
 	)
+
 	require.NoError(t, err)
 	defer p.Close(t.Context())
 
@@ -259,6 +274,7 @@ func TestS3_SSEC_ParamsPassedToGetObject(t *testing.T) {
 		tlss3.WithSseCustomerKey("my-secret-key"),
 		tlss3.WithSseCustomerKeyMD5("my-key-md5"),
 	)
+
 	require.NoError(t, err)
 	defer p.Close(t.Context())
 
@@ -304,6 +320,7 @@ func TestS3_Type(t *testing.T) {
 		tlss3.WithS3Client(client),
 		tlss3.WithPollInterval(time.Hour),
 	)
+
 	require.NoError(t, err)
 	defer p.Close(t.Context())
 

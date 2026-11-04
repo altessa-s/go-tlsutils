@@ -24,10 +24,12 @@ import (
 func newFileProvider(tb testing.TB, cert tls.Certificate, stapler *ocsp.Stapler, opts ...tlsfile.Option) *tlsfile.File {
 	tb.Helper()
 	certPath, keyPath := writeKeyPair(tb, tb.TempDir(), cert)
+
 	opts = append([]tlsfile.Option{tlsfile.WithLogger(discardLogger), tlsfile.WithOcspStapler(stapler)}, opts...)
 	prov, err := tlsfile.NewWithCertAndKey(certPath, keyPath, "", opts...)
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = prov.Close(tb.Context()) })
+
 	return prov
 }
 
@@ -84,6 +86,7 @@ func TestFailureModes(t *testing.T) {
 			pki := newTestPKI(t)
 			resp := newResponder(t, pki.inter, 0)
 			resp.mode.Store(tc.respMode)
+
 			url := resp.URL()
 			if tc.down {
 				url = deadURL(t)
@@ -101,6 +104,7 @@ func TestFailureModes(t *testing.T) {
 				require.NotEmpty(t, state.VerifiedChains)
 				require.Empty(t, state.OCSPResponse, "soft mode serves the certificate without a staple")
 			}
+
 			if tc.wantFetch {
 				require.Positive(t, resp.requests.Load(), "the responder must have been consulted")
 			}
@@ -113,6 +117,7 @@ func TestFailureModes(t *testing.T) {
 // while the responder sees exactly one request.
 func TestOCSP_SingleflightAcrossHandshakes(t *testing.T) {
 	t.Parallel()
+
 	const handshakes = 16
 
 	pki := newTestPKI(t)
@@ -128,17 +133,23 @@ func TestOCSP_SingleflightAcrossHandshakes(t *testing.T) {
 		states []tls.ConnectionState
 		errs   []error
 	)
+
 	start := make(chan struct{})
+
 	for range handshakes {
 		wg.Go(func() {
 			<-start
+
 			state, err := handshake(t, serverCfg, pki.clientConfig())
+
 			mu.Lock()
 			defer mu.Unlock()
+
 			states = append(states, state)
 			errs = append(errs, err)
 		})
 	}
+
 	close(start)
 	wg.Wait()
 
@@ -146,5 +157,6 @@ func TestOCSP_SingleflightAcrossHandshakes(t *testing.T) {
 		require.NoError(t, err)
 		requireGoodStaple(t, states[i], pki.inter.Cert)
 	}
+
 	require.Equal(t, int32(1), resp.requests.Load(), "concurrent cold-cache handshakes must share one fetch")
 }

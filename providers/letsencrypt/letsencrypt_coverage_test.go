@@ -41,11 +41,13 @@ func newProvider(t *testing.T, extra ...tlsletsencrypt.Option) *tlsletsencrypt.L
 	le, err := tlsletsencrypt.New(opts...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = le.Close(context.Background()) })
+
 	return le
 }
 
 func TestNew_RequiresDomainsAndEmail(t *testing.T) {
 	t.Parallel()
+
 	_, err := tlsletsencrypt.New(tlsletsencrypt.WithEmail("admin@example.com"))
 	require.ErrorIs(t, err, tlsletsencrypt.ErrNoDomains)
 
@@ -113,6 +115,7 @@ func TestStartHTTPServerWithContext_CanceledContext(t *testing.T) {
 
 func TestOptions_BlankAndPointerValues(t *testing.T) {
 	t.Parallel()
+
 	email := " admin@example.com "
 	blank := "   "
 	dir := t.TempDir()
@@ -153,6 +156,7 @@ func TestStartHTTPServerWithContext_HonorsPort(t *testing.T) {
 	// Reserve a free port, then hand it to the server.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+
 	addr := l.Addr().String()
 	require.NoError(t, l.Close())
 
@@ -163,6 +167,7 @@ func TestStartHTTPServerWithContext_HonorsPort(t *testing.T) {
 	require.NoError(t, err)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err, "the server listens on the configured port")
+
 	_ = resp.Body.Close()
 	require.Equal(t, http.StatusTeapot, resp.StatusCode)
 }
@@ -176,6 +181,7 @@ func TestStartHTTPServer_Wrapper(t *testing.T) {
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+
 	addr := l.Addr().String()
 	require.NoError(t, l.Close())
 
@@ -186,6 +192,7 @@ func TestStartHTTPServer_Wrapper(t *testing.T) {
 	require.NoError(t, err)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
+
 	_ = resp.Body.Close()
 	require.Equal(t, http.StatusTeapot, resp.StatusCode)
 }
@@ -199,7 +206,9 @@ func TestStartHTTPServerWithContext_ListenError(t *testing.T) {
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+
 	defer func() { _ = l.Close() }()
+
 	addr := l.Addr().String()
 
 	require.Error(t, le.StartHTTPServerWithContext(t.Context(), addr, nil))
@@ -208,6 +217,7 @@ func TestStartHTTPServerWithContext_ListenError(t *testing.T) {
 	// a free address afterward must succeed.
 	free, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+
 	freeAddr := free.Addr().String()
 	require.NoError(t, free.Close())
 	require.NoError(t, le.StartHTTPServerWithContext(t.Context(), freeAddr, nil))
@@ -224,6 +234,7 @@ func TestStartHTTPServerWithContext_ContextCancelAllowsRestart(t *testing.T) {
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+
 	addr := l.Addr().String()
 	require.NoError(t, l.Close())
 
@@ -243,7 +254,9 @@ func TestStartHTTPServerWithContext_ShutdownTimeoutForcesClose(t *testing.T) {
 	le := newProvider(t, tlsletsencrypt.WithHTTPShutdownTimeout(20*time.Millisecond))
 
 	block := make(chan struct{})
+
 	t.Cleanup(func() { close(block) })
+
 	requestStarted := make(chan struct{})
 	fallback := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		close(requestStarted)
@@ -252,6 +265,7 @@ func TestStartHTTPServerWithContext_ShutdownTimeoutForcesClose(t *testing.T) {
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+
 	addr := l.Addr().String()
 	require.NoError(t, l.Close())
 
@@ -266,6 +280,7 @@ func TestStartHTTPServerWithContext_ShutdownTimeoutForcesClose(t *testing.T) {
 		if rErr != nil {
 			return
 		}
+
 		resp, doErr := http.DefaultClient.Do(req)
 		if doErr == nil {
 			_ = resp.Body.Close()
@@ -277,6 +292,7 @@ func TestStartHTTPServerWithContext_ShutdownTimeoutForcesClose(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		require.Fail(t, "timeout waiting for the blocking request to start")
 	}
+
 	cancel()
 
 	// The hard Close fallback must still let a new server bind afterward.
@@ -297,6 +313,7 @@ func TestClose_StopsShutdownWatcher(t *testing.T) {
 	require.Eventually(t, func() bool {
 		buf := make([]byte, 1<<20)
 		stacks := string(buf[:runtime.Stack(buf, true)])
+
 		return !strings.Contains(stacks, "(*LetsEncrypt).StartHTTPServerWithContext.func")
 	}, 2*time.Second, 10*time.Millisecond, "server goroutines must exit after Close")
 }
