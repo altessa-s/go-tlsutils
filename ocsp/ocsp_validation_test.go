@@ -17,9 +17,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/altessa-s/go-tlsutils/internal/testhelpers"
-
 	"golang.org/x/crypto/ocsp"
+
+	"github.com/altessa-s/go-tlsutils/internal/testhelpers"
 )
 
 // responderSpec shapes the response served by testResponder.
