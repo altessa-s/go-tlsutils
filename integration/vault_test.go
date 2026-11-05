@@ -42,16 +42,19 @@ func (f *fakePKI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	block, _ := pem.Decode([]byte(body.CSR))
 	if block == nil {
 		http.Error(w, "missing CSR", http.StatusBadRequest)
 		return
 	}
+
 	csr, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject:      csr.Subject,
@@ -63,11 +66,13 @@ func (f *fakePKI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		OCSPServer:   []string{f.ocspURL},
 	}
+
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, f.issuer.Cert, csr.PublicKey, f.issuer.Key)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	f.signs.Add(1)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
@@ -82,6 +87,7 @@ func (f *fakePKI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // and that the served certificate is stapled.
 func TestVaultProvider_IssuedCertificateHandshake(t *testing.T) {
 	t.Parallel()
+
 	const vaultServerName = "svc.example.com"
 
 	pki := newTestPKI(t)
@@ -106,6 +112,7 @@ func TestVaultProvider_IssuedCertificateHandshake(t *testing.T) {
 
 	serverCfg, err := prov.TLSConfig()
 	require.NoError(t, err)
+
 	clientCfg := pki.clientConfig()
 	clientCfg.ServerName = vaultServerName
 

@@ -14,6 +14,7 @@ import (
 
 func TestListenAddr(t *testing.T) {
 	t.Parallel()
+
 	tests := []struct {
 		in   string
 		want string

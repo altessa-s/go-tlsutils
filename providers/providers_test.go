@@ -25,7 +25,7 @@ func (m *mockProvider) Close(_ context.Context) error   { m.closed++; return nil
 // valueProvider is a non-comparable provider value: re-registering it must
 // not panic on ==.
 type valueProvider struct {
-	tags []string
+	tags []string //nolint:unused // Makes the type non-comparable.
 }
 
 func (valueProvider) Type() ProviderType              { return ProviderTypeS3 }
@@ -36,6 +36,7 @@ func TestProviders_Close_ClosesReplaced(t *testing.T) {
 	p := &Providers{}
 	first := &mockProvider{typ: ProviderTypeFile}
 	second := &mockProvider{typ: ProviderTypeFile}
+
 	p.Register(first)
 	p.Register(second)
 	p.Register(second) // re-registering the active provider replaces nothing
@@ -71,6 +72,7 @@ func TestProviders_NonComparableValueClosedOnce(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			p := &Providers{}
 			v := anyFieldProvider{v: field, done: make(chan struct{})}
+
 			require.NotPanics(t, func() {
 				p.Register(v)
 				p.Register(v) // the same value again
@@ -84,6 +86,7 @@ func TestProviders_Close_ReRegisteredClosesOnce(t *testing.T) {
 	p := &Providers{}
 	a := &mockProvider{typ: ProviderTypeFile}
 	b := &mockProvider{typ: ProviderTypeFile}
+
 	p.Register(a)
 	p.Register(b)
 	p.Register(a) // a becomes active again; b is displaced
@@ -142,6 +145,7 @@ func TestProviders_Close(t *testing.T) {
 	p.Register(&mockProvider{typ: ProviderTypeVault})
 
 	var errCount int
+
 	p.Close(t.Context(), func(_ Provider, _ error) {
 		errCount++
 	})
@@ -157,12 +161,14 @@ func TestProviders_List(t *testing.T) {
 	for range p.List() {
 		count++
 	}
+
 	require.Equal(t, 2, count)
 }
 
 func BenchmarkProviders_Get(b *testing.B) {
 	p := &Providers{}
 	p.Register(&mockProvider{typ: ProviderTypeFile})
+
 	for b.Loop() {
 		p.Get(ProviderTypeFile)
 	}

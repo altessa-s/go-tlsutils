@@ -46,9 +46,11 @@ func New(opt ...Option) (*LetsEncrypt, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if opts.logger == nil {
 		opts.logger = slog.New(slog.DiscardHandler)
 	}
+
 	if err := opts.validate(); err != nil {
 		return nil, err
 	}
@@ -112,6 +114,7 @@ func listenAddr(addr string) string {
 		if port == "" {
 			port = "http"
 		}
+
 		return net.JoinHostPort(host, port)
 	}
 	// Accept host-only addresses too (e.g. "0.0.0.0", "localhost", "::").
@@ -268,6 +271,7 @@ func (le *LetsEncrypt) Close(ctx context.Context) error {
 	if srv != nil {
 		return srv.Shutdown(ctx)
 	}
+
 	return nil
 }
 

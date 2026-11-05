@@ -14,6 +14,9 @@ import (
 type Option func(o *options)
 
 // WithCompression enables the enableCompression option.
+//
+// enableCompression requests gzip-encoded responder replies (decoded with
+// the same 1 MiB cap). The cache always holds raw DER.
 func WithCompression() Option {
 	return func(o *options) {
 		value := true
@@ -49,6 +52,9 @@ func WithMaxCacheEntries(v int) Option {
 }
 
 // WithMaxResponseAge sets the maxResponseAge option.
+//
+// maxResponseAge bounds the age (from thisUpdate) of a response that
+// carries no nextUpdate; non-positive values keep the default.
 func WithMaxResponseAge(v time.Duration) Option {
 	return func(o *options) {
 		if v <= 0 {

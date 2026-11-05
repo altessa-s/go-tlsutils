@@ -31,6 +31,7 @@ func BenchmarkGetCertificate_WarmCache(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+
 	b.Cleanup(func() { _ = v.Close(b.Context()) })
 
 	hello := &tls.ClientHelloInfo{ServerName: "svc.example.com"}
@@ -39,6 +40,7 @@ func BenchmarkGetCertificate_WarmCache(b *testing.B) {
 	}
 
 	b.ReportAllocs()
+
 	for b.Loop() {
 		_, _ = v.GetCertificate(hello)
 	}

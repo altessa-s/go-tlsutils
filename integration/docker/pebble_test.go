@@ -80,6 +80,7 @@ func TestPebbleACME(t *testing.T) {
 	// The first handshake drives the whole ACME order.
 	hsCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+
 	root := pebbleRoot(t, ctx, httpClient, mgmtEndpoint)
 	roots := x509.NewCertPool()
 	roots.AddCert(root)
@@ -94,9 +95,12 @@ func TestPebbleACME(t *testing.T) {
 // port is reached on.
 func pebbleHTTPClient(tb testing.TB, ctx context.Context, ctr testcontainers.Container) *http.Client {
 	tb.Helper()
+
 	rc, err := ctr.CopyFileFromContainer(ctx, pebbleMinica)
 	require.NoError(tb, err)
+
 	defer func() { _ = rc.Close() }()
+
 	minica, err := io.ReadAll(rc)
 	require.NoError(tb, err)
 
@@ -119,11 +123,14 @@ func pebbleHTTPClient(tb testing.TB, ctx context.Context, ctr testcontainers.Con
 // management interface.
 func pebbleRoot(tb testing.TB, ctx context.Context, client *http.Client, mgmtEndpoint string) *x509.Certificate {
 	tb.Helper()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mgmtEndpoint+"/roots/0", http.NoBody)
 	require.NoError(tb, err)
 	resp, err := client.Do(req)
 	require.NoError(tb, err)
+
 	defer func() { _ = resp.Body.Close() }()
+
 	require.Equal(tb, http.StatusOK, resp.StatusCode)
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(tb, err)

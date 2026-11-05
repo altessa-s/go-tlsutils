@@ -41,7 +41,9 @@ func ExecuteWithRetry(ctx context.Context, policy RetryPolicy, fn func() error, 
 	if policy == nil {
 		return fn()
 	}
+
 	o := newRetryOptions(opts...)
+
 	return coreretry.Do(ctx, func(context.Context) error {
 		return fn()
 	},

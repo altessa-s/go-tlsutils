@@ -33,6 +33,7 @@ const pw = "s3cret"
 // leaf returns a self-signed certificate PEM for key.
 func leaf(t *testing.T, key crypto.Signer) []byte {
 	t.Helper()
+
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(42),
 		Subject:      pkix.Name{CommonName: "coverage.test"},
@@ -43,6 +44,7 @@ func leaf(t *testing.T, key crypto.Signer) []byte {
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
 	require.NoError(t, err)
+
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
@@ -53,25 +55,31 @@ func ecKey(t *testing.T) *ecdsa.PrivateKey {
 
 func pkcs8PEM(t *testing.T, key any) []byte {
 	t.Helper()
+
 	der, err := x509.MarshalPKCS8PrivateKey(key)
 	require.NoError(t, err)
+
 	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 }
 
 func encryptedPKCS8PEM(t *testing.T, key any, password string) []byte {
 	t.Helper()
+
 	der, err := pkcs8.MarshalPrivateKey(key, []byte(password), nil)
 	require.NoError(t, err)
+
 	return pem.EncodeToMemory(&pem.Block{Type: "ENCRYPTED PRIVATE KEY", Bytes: der})
 }
 
 func legacyEncryptedECPEM(t *testing.T, key *ecdsa.PrivateKey, password string) []byte {
 	t.Helper()
+
 	der, err := x509.MarshalECPrivateKey(key)
 	require.NoError(t, err)
 	//nolint:staticcheck // SA1019: legacy PEM encryption is the format under test
 	block, err := x509.EncryptPEMBlock(rand.Reader, "EC PRIVATE KEY", der, []byte(password), x509.PEMCipherAES256)
 	require.NoError(t, err)
+
 	return pem.EncodeToMemory(block)
 }
 
@@ -80,6 +88,7 @@ func writeFile(t *testing.T, name string, data []byte, perm os.FileMode) string 
 	p := filepath.Join(t.TempDir(), name)
 	require.NoError(t, os.WriteFile(p, data, perm))
 	require.NoError(t, os.Chmod(p, perm))
+
 	return p
 }
 
@@ -323,6 +332,7 @@ func intermediateAndLeaf(t *testing.T, leafKey crypto.Signer) (chainPEM []byte, 
 		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER}),
 		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}),
 	}, nil)
+
 	return chainPEM, leafCert
 }
 

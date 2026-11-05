@@ -24,7 +24,9 @@ func BenchmarkMTLSServerConfig(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+
 	b.ReportAllocs()
+
 	for b.Loop() {
 		_ = p.MTLSServerConfig()
 	}
@@ -34,19 +36,24 @@ func BenchmarkMTLSServerConfig(b *testing.B) {
 // makeSVID but takes testing.TB so a benchmark can call it.
 func benchSVID(tb testing.TB, ca *testhelpers.CA, idStr string) *x509svid.SVID {
 	tb.Helper()
+
 	id := spiffeid.RequireFromString(idStr)
+
 	uri, err := url.Parse(id.String())
 	if err != nil {
 		tb.Fatalf("parse SPIFFE ID: %v", err)
 	}
+
 	cert := ca.SignLeaf(tb,
 		testhelpers.WithURIs(uri),
 		testhelpers.WithExtKeyUsage(x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth),
 	)
+
 	signer, ok := cert.PrivateKey.(crypto.Signer)
 	if !ok {
 		tb.Fatal("leaf private key is not a crypto.Signer")
 	}
+
 	return &x509svid.SVID{ID: id, Certificates: []*x509.Certificate{cert.Leaf}, PrivateKey: signer}
 }
 
@@ -68,10 +75,12 @@ func BenchmarkMTLSServerConfig_GetCertificate(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+
 	cfg := p.MTLSServerConfig()
 	hello := &tls.ClientHelloInfo{}
 
 	b.ReportAllocs()
+
 	for b.Loop() {
 		if _, err := cfg.GetCertificate(hello); err != nil {
 			b.Fatal(err)

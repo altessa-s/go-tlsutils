@@ -31,9 +31,11 @@ func cacheKey(cert *tls.Certificate) string {
 func (s *Stapler) store(key string, entry *ocspCacheEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if _, exists := s.cache[key]; !exists && s.maxCacheEntries > 0 && len(s.cache) >= s.maxCacheEntries {
 		s.makeRoomLocked(time.Now())
 	}
+
 	s.cache[key] = entry
 }
 
@@ -48,18 +50,22 @@ func (s *Stapler) makeRoomLocked(now time.Time) {
 		oldestTime time.Time
 		found      bool
 	)
+
 	for key, entry := range s.cache {
 		entry.mu.RLock()
 		t := entry.nextUpdate
 		entry.mu.RUnlock()
+
 		if now.After(t) {
 			delete(s.cache, key)
 			continue
 		}
+
 		if !found || t.Before(oldestTime) {
 			oldestKey, oldestTime, found = key, t, true
 		}
 	}
+
 	if found && len(s.cache) >= s.maxCacheEntries {
 		delete(s.cache, oldestKey)
 	}
@@ -71,6 +77,7 @@ func (s *Stapler) removeExpiredEntries() {
 	defer s.mu.Unlock()
 
 	now := time.Now()
+
 	for key, entry := range s.cache {
 		entry.mu.RLock()
 		expired := now.After(entry.nextUpdate)

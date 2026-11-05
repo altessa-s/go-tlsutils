@@ -36,6 +36,7 @@ func (o *options) validate() error {
 	if len(o.domains) == 0 {
 		return ErrNoDomains
 	}
+
 	if o.email == "" {
 		return ErrNoEmail
 	}

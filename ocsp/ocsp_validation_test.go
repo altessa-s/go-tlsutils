@@ -17,9 +17,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/altessa-s/go-tlsutils/internal/testhelpers"
-
 	"golang.org/x/crypto/ocsp"
+
+	"github.com/altessa-s/go-tlsutils/internal/testhelpers"
 )
 
 // responderSpec shapes the response served by testResponder.
@@ -33,26 +33,32 @@ type responderSpec struct {
 // testResponder serves a CA-signed "good" OCSP response shaped by spec.
 func testResponder(t *testing.T, ca *testhelpers.CA, spec responderSpec) *httptest.Server {
 	t.Helper()
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if spec.gzipBody != nil {
 			w.Header().Set("Content-Encoding", "gzip")
 			_, _ = w.Write(spec.gzipBody)
+
 			return
 		}
+
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
 		req, err := ocsp.ParseRequest(body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
 		serial := req.SerialNumber
 		if spec.serial != nil {
 			serial = spec.serial
 		}
+
 		der, err := ocsp.CreateResponse(ca.Cert, ca.Cert, ocsp.Response{
 			Status:       ocsp.Good,
 			SerialNumber: serial,
@@ -63,9 +69,11 @@ func testResponder(t *testing.T, ca *testhelpers.CA, spec responderSpec) *httpte
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		_, _ = w.Write(der)
 	}))
 	t.Cleanup(srv.Close)
+
 	return srv
 }
 
@@ -74,16 +82,20 @@ func chainFor(t *testing.T, ca *testhelpers.CA, srv *httptest.Server) *tls.Certi
 	t.Helper()
 	leaf := ca.SignLeaf(t, testhelpers.WithOCSPServers(srv.URL))
 	leaf.Certificate = append(leaf.Certificate, ca.Cert.Raw)
+
 	return &leaf
 }
 
 func gzipBytes(t *testing.T, data []byte) []byte {
 	t.Helper()
+
 	var buf bytes.Buffer
+
 	w := gzip.NewWriter(&buf)
 	_, err := w.Write(data)
 	require.NoError(t, err)
 	require.NoError(t, w.Close())
+
 	return buf.Bytes()
 }
 
@@ -144,12 +156,16 @@ func TestGetOCSPStaple_ResponseValidation(t *testing.T) {
 			if tc.wantErr == nil && !tc.anyErr {
 				require.NoError(t, err)
 				require.NotEmpty(t, staple)
+
 				return
 			}
+
 			require.Error(t, err)
+
 			if tc.wantErr != nil {
 				require.ErrorIs(t, err, tc.wantErr)
 			}
+
 			require.Empty(t, staple)
 			soft.mu.RLock()
 			require.Empty(t, soft.cache, "a rejected response must not be cached")
@@ -178,7 +194,9 @@ func TestGetOCSPStaple_MaxResponseAge(t *testing.T) {
 
 		s.mu.RLock()
 		defer s.mu.RUnlock()
+
 		require.Len(t, s.cache, 1)
+
 		for _, e := range s.cache {
 			require.False(t, e.nextUpdate.After(thisUpdate.Add(DefaultMaxResponseAge)),
 				"cached until %s, past the max-age deadline", e.nextUpdate)

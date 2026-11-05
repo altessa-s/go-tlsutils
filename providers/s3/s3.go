@@ -90,6 +90,7 @@ func New(bucket, certObjectKey, privKeyObjectKey, keyPassword string, opts ...Op
 		if err != nil {
 			return nil, fmt.Errorf("creating default S3 client: %w", err)
 		}
+
 		o.s3Client = client
 	}
 
@@ -167,7 +168,9 @@ func (p *S3) GetClientCertificate(*tls.CertificateRequestInfo) (*tls.Certificate
 	if p.cert == nil {
 		return nil, errors.New("TLS certificate not loaded")
 	}
+
 	cert := *p.cert
+
 	return &cert, nil
 }
 
@@ -245,6 +248,7 @@ func (p *S3) downloadObject(ctx context.Context, bucket, key string) ([]byte, st
 	if err != nil {
 		return nil, "", err
 	}
+
 	if len(data) > maxObjectBytes {
 		return nil, "", fmt.Errorf("object %s/%s exceeds %d bytes", bucket, key, maxObjectBytes)
 	}
@@ -257,6 +261,7 @@ func (p *S3) checkForChanges(ctx context.Context) {
 	if err != nil {
 		p.logger.WarnContext(ctx, "failed to check certificate ETag",
 			"bucket", p.bucket, "key", p.certKey, slog.Any("error", err))
+
 		return
 	}
 
@@ -264,6 +269,7 @@ func (p *S3) checkForChanges(ctx context.Context) {
 	if err != nil {
 		p.logger.WarnContext(ctx, "failed to check private key ETag",
 			"bucket", p.bucket, "key", p.privKeyKey, slog.Any("error", err))
+
 		return
 	}
 
@@ -306,6 +312,7 @@ func (p *S3) applySSEC(algorithm, key, keyMD5 **string) {
 	if p.options.sseType != SSETypeC {
 		return
 	}
+
 	*algorithm = aws.String("AES256")
 	*key = aws.String(p.options.sseCustomerKey)
 	*keyMD5 = aws.String(p.options.sseCustomerKeyMD5)
@@ -332,6 +339,7 @@ func defaultS3Client(ctx context.Context) (*s3.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return s3.NewFromConfig(cfg), nil
 }
 

@@ -11,6 +11,10 @@ import (
 type Option func(o *options)
 
 // WithSocketPath sets the socketPath option.
+//
+// socketPath is the SPIFFE Workload API endpoint address (for example
+// "unix:///run/spire/agent/api.sock"). Empty falls back to the standard
+// SPIFFE_ENDPOINT_SOCKET environment variable.
 func WithSocketPath[T interface{ string | *string }](v T) Option {
 	return func(o *options) {
 		var value string

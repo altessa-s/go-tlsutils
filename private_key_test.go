@@ -35,20 +35,24 @@ func TestParsePrivateKeyPEM(t *testing.T) {
 	rsaKey := testhelpers.GenerateRSAKey(t, 2048)
 	ecDER, err := x509.MarshalECPrivateKey(ec)
 	require.NoError(t, err)
+
 	for _, key := range []crypto.Signer{ed, ec, rsaKey} {
 		for _, encrypted := range []bool{false, true} {
 			data := pkcs8PEM(t, key)
+
 			password := ""
 			if encrypted {
 				password = pw
 				data = encryptedPKCS8PEM(t, key, password)
 			}
+
 			got, err := tlsutils.ParsePrivateKeyPEM(data, password)
 			require.NoError(t, err)
 			require.Equal(t, key.Public(), got.Public())
 			cert, err := tlsutils.LoadFromBytes(leaf(t, key), data, password)
 			require.NoError(t, err)
 			require.Equal(t, cert.PrivateKey, got)
+
 			if encrypted {
 				got, err = tlsutils.ParsePrivateKeyPEM(data, "wrong")
 				require.Nil(t, got)
@@ -57,6 +61,7 @@ func TestParsePrivateKeyPEM(t *testing.T) {
 			}
 		}
 	}
+
 	for _, tc := range []struct {
 		name string
 		data []byte
@@ -79,6 +84,7 @@ func TestParsePrivateKeyPEMErrors(t *testing.T) {
 	ec := ecKey(t)
 	unsupported, err := ecdh.X25519().GenerateKey(rand.Reader)
 	require.NoError(t, err)
+
 	malformed := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("secret-key-material")})
 	for _, data := range [][]byte{
 		nil, {}, []byte("garbage"), leaf(t, ec), pkcs8PEM(t, unsupported),
@@ -89,11 +95,13 @@ func TestParsePrivateKeyPEMErrors(t *testing.T) {
 		key, err := tlsutils.ParsePrivateKeyPEM(data, pw)
 		require.Nil(t, key)
 		require.ErrorIs(t, err, tlsutils.ErrInvalidPrivateKey)
+
 		var typed *tlsutils.PrivateKeyError
 		require.ErrorAs(t, err, &typed)
 		require.NotContains(t, err.Error(), pw)
 		require.NotContains(t, err.Error(), "secret-key-material")
 	}
+
 	for _, data := range [][]byte{encryptedPKCS8PEM(t, ec, pw), legacyEncryptedECPEM(t, ec, pw)} {
 		key, err := tlsutils.ParsePrivateKeyPEM(data, "")
 		require.Nil(t, key)
@@ -112,16 +120,21 @@ func TestParsePrivateKeyPEMErrors(t *testing.T) {
 // non-block-aligned, exercising validation before decryption.
 func truncatedPKCS8(t testing.TB, data []byte) []byte {
 	t.Helper()
+
 	block, _ := pem.Decode(data)
+
 	var info struct {
 		Algorithm asn1.RawValue
 		Data      []byte
 	}
+
 	_, err := asn1.Unmarshal(block.Bytes, &info)
 	require.NoError(t, err)
+
 	info.Data = info.Data[:len(info.Data)-1]
 	block.Bytes, err = asn1.Marshal(info)
 	require.NoError(t, err)
+
 	return pem.EncodeToMemory(block)
 }
 
@@ -137,35 +150,46 @@ func FuzzParsePrivateKeyPEM(f *testing.F) {
 	der, err := x509.MarshalPKCS8PrivateKey(key)
 	require.NoError(f, err)
 	f.Add(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), "")
+
 	encrypted, err := pkcs8.MarshalPrivateKey(key, []byte(pw), nil)
 	require.NoError(f, err)
+
 	encryptedPEM := pem.EncodeToMemory(&pem.Block{Type: "ENCRYPTED PRIVATE KEY", Bytes: encrypted})
 	f.Add(encryptedPEM, pw)
 	f.Add(encryptedPEM, "wrong")
 	f.Add(truncatedPKCS8(f, encryptedPEM), pw)
 	f.Add([]byte("garbage"), "password")
 	f.Add([]byte{}, "")
+
 	for _, data := range excessiveKDFKeys(f) {
 		f.Add(data, pw)
 	}
+
 	f.Fuzz(func(t *testing.T, data []byte, password string) {
 		if exceedsFuzzKDFBudget(data) {
 			t.Skip("KDF exceeds fuzzing budget")
 		}
+
 		signer, err := tlsutils.ParsePrivateKeyPEM(data, password)
 		if err != nil {
 			require.Nil(t, signer)
+
 			var typed *tlsutils.PrivateKeyError
 			require.ErrorAs(t, err, &typed)
+
 			matches := 0
+
 			for _, sentinel := range []error{tlsutils.ErrInvalidPrivateKey, tlsutils.ErrIncorrectPassword, tlsutils.ErrPasswordRequired} {
 				if errors.Is(err, sentinel) {
 					matches++
 				}
 			}
+
 			require.Equal(t, 1, matches, "every parsing error must wrap exactly one documented sentinel")
+
 			return
 		}
+
 		require.NotNil(t, signer)
 		der, err := x509.MarshalPKCS8PrivateKey(signer)
 		require.NoError(t, err)
@@ -178,9 +202,11 @@ func FuzzParsePrivateKeyPEM(f *testing.F) {
 // craftedKDFKey builds an encrypted envelope without running the advertised KDF.
 func craftedKDFKey(t testing.TB, oid asn1.ObjectIdentifier, params any) []byte {
 	t.Helper()
+
 	marshal := func(value any) []byte {
 		data, err := asn1.Marshal(value)
 		require.NoError(t, err)
+
 		return data
 	}
 	pbes2 := struct {
@@ -203,13 +229,16 @@ func craftedKDFKey(t testing.TB, oid asn1.ObjectIdentifier, params any) []byte {
 		},
 		Data: make([]byte, 16),
 	}
+
 	return pem.EncodeToMemory(&pem.Block{Type: "ENCRYPTED PRIVATE KEY", Bytes: marshal(info)})
 }
 
 func excessiveKDFKeys(t testing.TB) map[string][]byte {
 	t.Helper()
+
 	pbkdf2OID := asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 5, 12}
 	scryptOID := asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 11591, 4, 11}
+
 	keys := make(map[string][]byte)
 	for name, iterations := range map[string]int{
 		"huge PBKDF2": 1 << 30, "PBKDF2 over limit": 10_000_001, "zero PBKDF2": 0, "negative PBKDF2": -1,
@@ -219,6 +248,7 @@ func excessiveKDFKeys(t testing.TB) map[string][]byte {
 			IterationCount int
 		}{[]byte("test salt"), iterations})
 	}
+
 	for name, costs := range map[string][3]int{
 		"huge scrypt N":            {1 << 30, 8, 1},
 		"scrypt N above limit":     {1 << 21, 8, 1},
@@ -237,8 +267,10 @@ func excessiveKDFKeys(t testing.TB) map[string][]byte {
 			N, R, P int
 		}{[]byte("test salt"), costs[0], costs[1], costs[2]})
 	}
+
 	keys["unknown KDF"] = craftedKDFKey(t, asn1.ObjectIdentifier{1, 2, 3, 4}, struct{ Salt []byte }{[]byte("salt")})
 	keys["malformed KDF"] = craftedKDFKey(t, pbkdf2OID, []byte("malformed"))
+
 	return keys
 }
 
@@ -271,6 +303,7 @@ func TestParsePrivateKeyPEMDecryptedMalformedLegacy(t *testing.T) {
 	//nolint:staticcheck // SA1019: legacy PEM encryption is the format under test
 	block, err := x509.EncryptPEMBlock(rand.Reader, "EC PRIVATE KEY", []byte("invalid DER"), []byte(pw), x509.PEMCipherAES256)
 	require.NoError(t, err)
+
 	data := pem.EncodeToMemory(block)
 	signer, err := tlsutils.ParsePrivateKeyPEM(data, pw)
 	require.Nil(t, signer)
@@ -288,13 +321,17 @@ func exceedsFuzzKDFBudget(data []byte) bool {
 		if block == nil {
 			return false
 		}
+
 		data = rest
+
 		if !strings.HasSuffix(block.Type, "PRIVATE KEY") {
 			continue
 		}
+
 		if block.Type != "ENCRYPTED PRIVATE KEY" {
 			return false
 		}
+
 		var info struct {
 			Algorithm pkix.AlgorithmIdentifier
 			Data      []byte
@@ -302,6 +339,7 @@ func exceedsFuzzKDFBudget(data []byte) bool {
 		if _, err := asn1.Unmarshal(block.Bytes, &info); err != nil {
 			return false
 		}
+
 		var params struct {
 			KDF    pkix.AlgorithmIdentifier
 			Cipher pkix.AlgorithmIdentifier
@@ -309,6 +347,7 @@ func exceedsFuzzKDFBudget(data []byte) bool {
 		if _, err := asn1.Unmarshal(info.Algorithm.Parameters.FullBytes, &params); err != nil {
 			return false
 		}
+
 		switch {
 		case params.KDF.Algorithm.Equal(asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 5, 12}):
 			var kdf struct {
@@ -319,6 +358,7 @@ func exceedsFuzzKDFBudget(data []byte) bool {
 			if _, err := asn1.Unmarshal(params.KDF.Parameters.FullBytes, &kdf); err != nil {
 				return false
 			}
+
 			return kdf.Iterations > 100_000
 		case params.KDF.Algorithm.Equal(asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 11591, 4, 11}):
 			var kdf struct {
@@ -328,6 +368,7 @@ func exceedsFuzzKDFBudget(data []byte) bool {
 			if _, err := asn1.Unmarshal(params.KDF.Parameters.FullBytes, &kdf); err != nil {
 				return false
 			}
+
 			if kdf.N <= 0 || kdf.R <= 0 || kdf.P <= 0 {
 				return false
 			}
@@ -350,6 +391,7 @@ func TestPrivateKeyFuzzKDFBudget(t *testing.T) {
 		require.Equal(t, count > 100_000, exceedsFuzzKDFBudget(data))
 		require.Equal(t, count > 100_000, exceedsFuzzKDFBudget(append(leaf(t, ecKey(t)), data...)))
 	}
+
 	oid = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 11591, 4, 11}
 	for _, costs := range [][3]int{{2048, 8, 1}, {4096, 8, 1}, {2048, 8, 2}, {1 << 30, 1 << 30, 1 << 30}} {
 		data := craftedKDFKey(t, oid, struct {
@@ -358,6 +400,7 @@ func TestPrivateKeyFuzzKDFBudget(t *testing.T) {
 		}{[]byte("salt"), costs[0], costs[1], costs[2]})
 		require.Equal(t, costs != [3]int{2048, 8, 1}, exceedsFuzzKDFBudget(data))
 	}
+
 	require.False(t, exceedsFuzzKDFBudget([]byte("garbage")))
 	require.False(t, exceedsFuzzKDFBudget(pkcs8PEM(t, ecKey(t))))
 }
@@ -366,6 +409,7 @@ func TestParsePrivateKeyPEMScryptOneGiB(t *testing.T) {
 	if os.Getenv("TLSUTILS_EXPENSIVE_TESTS") != "1" {
 		t.Skip("set TLSUTILS_EXPENSIVE_TESTS=1 to run the 1 GiB scrypt regression")
 	}
+
 	key := ecKey(t)
 	der, err := pkcs8.MarshalPrivateKey(key, []byte(pw), &pkcs8.Opts{
 		Cipher:  pkcs8.AES256CBC,
@@ -383,6 +427,7 @@ func TestParsePrivateKeyPEMLegacyFormats(t *testing.T) {
 	require.NoError(t, err)
 	edDER, err := x509.MarshalPKCS8PrivateKey(ed)
 	require.NoError(t, err)
+
 	for _, format := range []struct {
 		name, label string
 		der         []byte
@@ -395,7 +440,9 @@ func TestParsePrivateKeyPEMLegacyFormats(t *testing.T) {
 			//nolint:staticcheck // SA1019: legacy encryption is the format under test
 			block, err := x509.EncryptPEMBlock(rand.Reader, format.label, format.der, []byte(pw), x509.PEMCipherAES256)
 			require.NoError(t, err)
+
 			data := pem.EncodeToMemory(block)
+
 			for _, tc := range []struct {
 				name, password string
 				want           error
@@ -407,8 +454,10 @@ func TestParsePrivateKeyPEMLegacyFormats(t *testing.T) {
 					if tc.want != nil {
 						require.Nil(t, signer)
 						require.ErrorIs(t, err, tc.want)
+
 						return
 					}
+
 					require.NoError(t, err)
 					require.Equal(t, format.key.Public(), signer.Public())
 				})
@@ -425,17 +474,22 @@ func TestPrivateKeyErrorNilCause(t *testing.T) {
 
 func TestParsePrivateKeyPEMWrongIVLength(t *testing.T) {
 	block, _ := pem.Decode(encryptedPKCS8PEM(t, ecKey(t), pw))
+
 	var info struct {
 		Algorithm pkix.AlgorithmIdentifier
 		Data      []byte
 	}
+
 	_, err := asn1.Unmarshal(block.Bytes, &info)
 	require.NoError(t, err)
+
 	var params struct{ KDF, Cipher pkix.AlgorithmIdentifier }
+
 	_, err = asn1.Unmarshal(info.Algorithm.Parameters.FullBytes, &params)
 	require.NoError(t, err)
 	iv, err := asn1.Marshal(make([]byte, 15))
 	require.NoError(t, err)
+
 	params.Cipher.Parameters = asn1.RawValue{FullBytes: iv}
 	info.Algorithm.Parameters.FullBytes, err = asn1.Marshal(params)
 	require.NoError(t, err)

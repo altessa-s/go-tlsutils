@@ -40,6 +40,7 @@ func BenchmarkClientTLSConfig(b *testing.B) {
 // their own copy without aliasing the package-level slice.
 func BenchmarkDefaultTLSConfig(b *testing.B) {
 	b.ReportAllocs()
+
 	for b.Loop() {
 		_ = tlsutils.DefaultTLSConfig()
 	}
@@ -58,6 +59,7 @@ func benchChainAndEncryptedKey(tb testing.TB) (certPEM, keyPEM []byte) {
 	if err != nil {
 		tb.Fatalf("generate CA key: %v", err)
 	}
+
 	caTmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject:      pkix.Name{CommonName: "bench-ca"},
@@ -66,10 +68,12 @@ func benchChainAndEncryptedKey(tb testing.TB) (certPEM, keyPEM []byte) {
 		IsCA:         true, BasicConstraintsValid: true,
 		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
 	}
+
 	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, caKey.Public(), caKey)
 	if err != nil {
 		tb.Fatalf("create CA certificate: %v", err)
 	}
+
 	caCert, err := x509.ParseCertificate(caDER)
 	if err != nil {
 		tb.Fatalf("parse CA certificate: %v", err)
@@ -79,6 +83,7 @@ func benchChainAndEncryptedKey(tb testing.TB) (certPEM, keyPEM []byte) {
 	if err != nil {
 		tb.Fatalf("generate leaf key: %v", err)
 	}
+
 	leafTmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(2),
 		Subject:      pkix.Name{CommonName: "bench-leaf"},
@@ -86,6 +91,7 @@ func benchChainAndEncryptedKey(tb testing.TB) (certPEM, keyPEM []byte) {
 		NotAfter:     time.Now().Add(time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 	}
+
 	leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, caCert, leafKey.Public(), caKey)
 	if err != nil {
 		tb.Fatalf("create leaf certificate: %v", err)
@@ -100,7 +106,9 @@ func benchChainAndEncryptedKey(tb testing.TB) (certPEM, keyPEM []byte) {
 	if err != nil {
 		tb.Fatalf("marshal encrypted key: %v", err)
 	}
+
 	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "ENCRYPTED PRIVATE KEY", Bytes: der})
+
 	return certPEM, keyPEM
 }
 
@@ -110,6 +118,7 @@ func benchChainAndEncryptedKey(tb testing.TB) (certPEM, keyPEM []byte) {
 func BenchmarkLoadFromBytes_ChainEncryptedKey(b *testing.B) {
 	certPEM, keyPEM := benchChainAndEncryptedKey(b)
 	b.ReportAllocs()
+
 	for b.Loop() {
 		if _, err := tlsutils.LoadFromBytes(certPEM, keyPEM, benchKeyPassword); err != nil {
 			b.Fatal(err)

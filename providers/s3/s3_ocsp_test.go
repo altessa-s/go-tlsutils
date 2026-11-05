@@ -57,6 +57,7 @@ func TestS3_ReloadPublishesFullyStapledConfig(t *testing.T) {
 	<-notify // initial load
 
 	stop := make(chan struct{})
+
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Go(func() {
@@ -66,6 +67,7 @@ func TestS3_ReloadPublishesFullyStapledConfig(t *testing.T) {
 					return
 				default:
 				}
+
 				cfg, cerr := p.TLSConfig()
 				if cerr != nil || cfg.GetCertificate == nil {
 					t.Error("published TLS config lacks the OCSP stapling callback")
@@ -80,12 +82,14 @@ func TestS3_ReloadPublishesFullyStapledConfig(t *testing.T) {
 		gen := strconv.Itoa(i + 2)
 		client.SetObject("certs/server.key", &mockObject{data: keyPEM, etag: `"etag-key-` + gen + `"`})
 		client.SetObject("certs/server.crt", &mockObject{data: certPEM, etag: `"etag-cert-` + gen + `"`})
+
 		select {
 		case <-notify:
 		case <-time.After(10 * time.Second):
 			require.Fail(t, "timeout waiting for certificate reload")
 		}
 	}
+
 	close(stop)
 	wg.Wait()
 }

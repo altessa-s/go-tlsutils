@@ -67,7 +67,8 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 **Types:** `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`, `perf`, `build`, `style`, `revert`
 
 **Scope** is optional. When present, it must be listed in [`commit_scopes.txt`](commit_scopes.txt). Never use `root`; omit the scope for
-repository-wide changes. Use `!` before the colon for a breaking change.
+repository-wide changes. Use `!` before the colon for a breaking change; a `BREAKING CHANGE:` footer explains it and is rejected without the `!`,
+because the release notes group breaking changes by the subject.
 
 Describe the concrete change and its purpose. Keep the body only when it explains behavior or a decision beyond the subject. Do not include filler,
 work logs, test results, coverage figures or validation summaries. Do not mention agents or AI assistance, add generation signatures, or add agent
@@ -100,23 +101,31 @@ and get no exemption.
 
 ### Formatting
 
-- Run `make fmt` before committing — this runs `gci` with the project's import ordering.
+- Run `make fmt` before committing — this runs `golangci-lint fmt`, whose `gci` formatter applies the project's import ordering (`make fmt-check`
+  reports without rewriting). Generated files follow the same rule: optgen writes them through `gofmt -w` and `make generate` then runs
+  `golangci-lint fmt` over every `*_gen.go`; the standalone `gci` binary is not used.
 - Maximum line length: **156 characters** (enforced by `lll` linter).
+- `wsl_v5` enforces blank lines around blocks and statements, and `godoclint` requires a doc comment on every exported symbol.
+- Test files are formatted like any other file and are linted by `asciicheck`, `copyloopvar`, `goprintffuncname`, `ineffassign`, `misspell`, `modernize`, `predeclared`, `unused`, `whitespace`, `wsl_v5` only; every other linter skips
+  `_test.go` files. Code behind test-only build tags (`integration` and the repository's other test tags) is linted too.
 
 ### Import Ordering
 
-Imports must follow this order (enforced by `gci` via `.golangci.yml`):
+Imports must follow this order (enforced by `gci` via `.golangci.yml`, in this exact order):
 
 1. Standard library
 2. Third-party packages (default)
 3. `google.golang.org`
 4. `golang.org`
-5. `github.com/altessa-s/go-atlas-core`
-6. `github.com/altessa-s/go-atlas-net`
-7. `github.com/altessa-s/go-tlsutils`
-8. `github.com/altessa-s` (other altessa packages)
-9. Blank imports
-10. Aliases
+5. `github.com/altessa-s` (other altessa packages)
+6. `github.com/altessa-s/go-tlsutils`
+7. Blank imports
+8. Aliases
+
+### Tests
+
+Tests may use the standard `testing` package alone or [testify](https://github.com/stretchr/testify) (`require` for preconditions, `assert`
+for independent checks); both are fine in library tests.
 
 ### Copyright Headers
 
@@ -133,8 +142,8 @@ All `.go` files must include the copyright header. Run `make copyright` to add i
 The repository holds several Go modules, listed in the Makefile's `MODULES`: the root (`tlsutils`, `ocsp`, `providers`, `providers/file`,
 `providers/letsencrypt`), `providers/s3`, `providers/vault`, `spiffe`, and the test-only `integration` and `integration/docker`. Every Go target runs
 in each module, so `make lint`, `make test-all` and the rest cover all of them; run `go` commands for a sub-module from its directory (or with
-`go -C <dir>`). A sub-module builds against the checkout through a `replace` directive; `go.work` is not committed. Add a new module to `MODULES`,
-`.github/dependabot.yml` and `commit_scopes.txt`.
+`go -C <dir>`). A sub-module builds against the checkout through a `replace` directive; `go.work` is not committed. Add a new module to `MODULES`
+in the template parameters and to `commit_scopes.txt`.
 
 Releases tag each changed module separately, root first: tag the root (`vX.Y.Z`), then set each sub-module's `require` of the root to that version,
 commit, and tag the sub-module (`providers/s3/vX.Y.Z`, `providers/vault/vX.Y.Z`, `spiffe/vX.Y.Z`). Consumers ignore `replace`, so a sub-module
@@ -147,6 +156,7 @@ release against their placeholder `go.mod`, and `make golangci` fails asking for
 | Target | Description |
 |--------|-------------|
 | `make fmt` | Format code and sort imports |
+| `make fmt-check` | Fail when `make fmt` would rewrite a file |
 | `make lint` | Tidy, format and run golangci-lint with the repo config (`.golangci.yml`) in every module |
 | `make golangci` | Run golangci-lint in every module without rewriting files (as CI does) |
 | `make vet` | Run go vet and the go fix modernizer check in every module |
@@ -171,24 +181,32 @@ release against their placeholder `go.mod`, and `make golangci` fails asking for
 | `make dupl` | Find code duplication |
 | `make dupl-check` | Fail on code duplication |
 | `make copyright` | Add copyright headers |
-| `make generate` | Build pinned optgen and gci into `bin/` and regenerate options |
+| `make generate` | Build pinned optgen and golangci-lint into `bin/`, regenerate options and format them |
+| `make generate-check` | Fail when `make generate` changes, adds or removes generated files (as CI does) |
 | `make tidy` | Run go mod tidy in every module |
 | `make govulncheck` | Run govulncheck in every module |
 | `make gosec` | Run gosec in every module |
 | `make security-scan` | Run govulncheck and gosec |
+| `make nested-build-check` | Build every sub-module of `NESTED_CHECK_MODULES` (and its latest released tag) against the root without `replace` directives (a no-op when it is empty) |
+| `make release` | Tag and push `VERSION` (clean `main` equal to `origin/main` only, one push URL for `origin`) |
 
 ## Generated options
 
 Package options are generated by [`optgen`](https://github.com/altessa-s/go-optgen) from the private `options` struct in each `options.go` into
-`options_gen.go`. `make generate` builds the optgen and gci versions pinned in `devtools/go.mod` into `bin/`
-and regenerates every package. When a change needs a new or changed option, edit the `options` struct and its `optgen` tags in `options.go`, run
-`make generate`, and commit the regenerated `options_gen.go` in the same change. Never edit `options_gen.go` by hand.
+`options_gen.go`. `make generate` builds the optgen and golangci-lint versions pinned in `devtools/go.mod` into `bin/`,
+regenerates every package and formats the result. When a change needs a new or changed option, edit the `options` struct and its `optgen` tags in
+`options.go`, run `make generate`, and commit the regenerated `options_gen.go` in the same change. Never edit `options_gen.go` by hand; CI runs
+`make generate-check` and fails when the committed files are stale.
+
+Options are only ever generated with go-optgen: do not hand-write `With…` option functions. A field may opt out with the `manual` directive
+(`optgen:"manual"`) only when the generator cannot express the option, and a comment next to the field must say why.
 
 ## CI checks
 
-CI requires at least 78% total statement coverage on Linux. Raise this floor as coverage improves; do not lower it to accommodate
-untested changes. The full suite runs with the race detector and shuffled test order, and the platform-gated code is cross-compiled for darwin and
-windows.
+CI requires at least 85% total statement coverage on Linux, counted over every package of a module by any of its tests
+(`-coverpkg=./...`). Raise this floor as coverage improves; do not lower it to accommodate untested changes. The full suite runs with the race
+detector and shuffled test order, generated files must match `make generate`, and
+every package is cross-compiled for darwin and windows.
 
 ## Fuzzing
 

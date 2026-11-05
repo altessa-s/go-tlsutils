@@ -20,6 +20,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # nested-build-check also builds the latest released tag of every
+          # checked sub-module against the working tree, so it needs the tags.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Go
@@ -38,6 +41,24 @@ jobs:
       - name: Run go vet and check go fix modernizers
         # go fix -diff exits non-zero when any modernizer would rewrite code.
         run: make vet
+
+      - name: Check formatting
+        # Diffs every module against golangci-lint fmt (gci import order), so a
+        # formatting failure shows the exact change make fmt would make.
+        run: make fmt-check
+
+      - name: Check generated files
+        run: make generate-check
+
+      - name: Check code duplication
+        run: make dupl-check
+
+      - name: Build nested modules against the root without replace
+        # Prints "no nested modules" and succeeds when NESTED_CHECK_MODULES is empty.
+        run: make nested-build-check
+
+      - name: Test the release version check
+        run: bash .github/scripts/test-release-version.sh
 
   test:
     name: Test
@@ -63,7 +84,7 @@ jobs:
 
       - name: Enforce coverage floor
         env:
-          COVERAGE_MIN: "78"
+          COVERAGE_MIN: "85"
         run: |
           COVERAGE=$(make --no-print-directory coverage-total | awk '{print $3}' | tr -d '%')
           echo "Total coverage: ${COVERAGE}% (minimum ${COVERAGE_MIN}%)"
@@ -103,9 +124,8 @@ jobs:
       contents: read
     strategy:
       matrix:
-        # linux is covered by the main build; guard the platform-gated
-        # code (*_linux.go / *_other.go) against build-tag rot on the
-        # other supported targets.
+        # linux is covered by the main build; keep every package building
+        # on the other supported targets.
         goos: [darwin, windows]
     steps:
       - name: Checkout

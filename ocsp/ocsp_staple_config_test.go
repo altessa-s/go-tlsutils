@@ -62,6 +62,7 @@ func TestStapleOCSPToConfig_OriginalGetCertificateSuccess(t *testing.T) {
 // stapling-related error.
 func TestStapleOCSPToConfig_OriginalGetCertificateError(t *testing.T) {
 	t.Parallel()
+
 	cfg := &tls.Config{
 		MinVersion:     tls.VersionTLS12,
 		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return nil, errors.New("lookup failed") },
@@ -81,6 +82,7 @@ func TestStapleOCSPToConfig_OriginalGetCertificateError(t *testing.T) {
 // certificate the server received.
 func clientCertHandshake(t *testing.T, serverCert tls.Certificate, clientCfg *tls.Config) ([][]byte, error) {
 	t.Helper()
+
 	serverCfg := &tls.Config{
 		Certificates: []tls.Certificate{serverCert},
 		ClientAuth:   tls.RequireAnyClientCert,
@@ -90,23 +92,29 @@ func clientCertHandshake(t *testing.T, serverCert tls.Certificate, clientCfg *tl
 	cConn, sConn := net.Pipe()
 	srv := tls.Server(sConn, serverCfg)
 	cli := tls.Client(cConn, clientCfg)
+
 	srvDone := make(chan struct{})
 	go func() {
 		defer close(srvDone)
+
 		_ = srv.HandshakeContext(t.Context())
 		_ = sConn.Close()
 	}()
 
 	err := cli.HandshakeContext(t.Context())
 	_ = cConn.Close()
+
 	<-srvDone
+
 	if err != nil {
 		return nil, err
 	}
+
 	peers := srv.ConnectionState().PeerCertificates
 	if len(peers) == 0 {
 		return nil, nil
 	}
+
 	return [][]byte{peers[0].Raw}, nil
 }
 
@@ -141,6 +149,7 @@ func TestStapleOCSPToConfig_WrapsOriginalGetClientCertificate(t *testing.T) {
 // original callback must abort the handshake with that same error.
 func TestStapleOCSPToConfig_OriginalGetClientCertificateError(t *testing.T) {
 	t.Parallel()
+
 	wantErr := errors.New("no client certificate available")
 	_, _, serverCert := testhelpers.SelfSignedCert(t)
 

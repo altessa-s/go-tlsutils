@@ -60,6 +60,7 @@ func newTestPKI(tb testing.TB) *testPKI {
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(tb, err)
+
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(2),
 		Subject:               pkix.Name{CommonName: "integration-intermediate"},
@@ -83,6 +84,7 @@ func newTestPKI(tb testing.TB) *testPKI {
 // ocspURL is embedded as the leaf's OCSP responder.
 func (p *testPKI) issueLeaf(tb testing.TB, ocspURL string) tls.Certificate {
 	tb.Helper()
+
 	opts := []testhelpers.CertOption{
 		testhelpers.WithCommonName(serverName),
 		testhelpers.WithDNSNames(serverName),
@@ -92,8 +94,10 @@ func (p *testPKI) issueLeaf(tb testing.TB, ocspURL string) tls.Certificate {
 	if ocspURL != "" {
 		opts = append(opts, testhelpers.WithOCSPServers(ocspURL))
 	}
+
 	cert := p.inter.SignLeaf(tb, opts...)
 	cert.Certificate = append(cert.Certificate, p.inter.Cert.Raw)
+
 	return cert
 }
 
@@ -108,14 +112,17 @@ func chainPEM(cert tls.Certificate) []byte {
 	for _, der := range cert.Certificate {
 		out = append(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)
 	}
+
 	return out
 }
 
 // keyPEM encodes cert's private key as PKCS#8.
 func keyPEM(tb testing.TB, cert tls.Certificate) []byte {
 	tb.Helper()
+
 	der, err := x509.MarshalPKCS8PrivateKey(cert.PrivateKey)
 	require.NoError(tb, err)
+
 	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 }
 
@@ -125,10 +132,12 @@ func keyPEM(tb testing.TB, cert tls.Certificate) []byte {
 // pairs the new certificate with the old key.
 func writeKeyPair(tb testing.TB, dir string, cert tls.Certificate) (certPath, keyPath string) {
 	tb.Helper()
+
 	certPath = filepath.Join(dir, "tls.crt")
 	keyPath = filepath.Join(dir, "tls.key")
 	require.NoError(tb, os.WriteFile(keyPath, keyPEM(tb, cert), 0o600))
 	require.NoError(tb, os.WriteFile(certPath, chainPEM(cert), 0o644)) //nolint:gosec // certificates are public
+
 	return certPath, keyPath
 }
 
@@ -154,9 +163,11 @@ type responder struct {
 // fetches overlap.
 func newResponder(tb testing.TB, issuer *testhelpers.CA, delay time.Duration) *responder {
 	tb.Helper()
+
 	r := &responder{issuer: issuer, delay: delay}
 	r.srv = httptest.NewServer(r)
 	tb.Cleanup(r.srv.Close)
+
 	return r
 }
 
@@ -164,9 +175,11 @@ func (r *responder) URL() string { return r.srv.URL }
 
 func (r *responder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.requests.Add(1)
+
 	if r.delay > 0 {
 		timer := time.NewTimer(r.delay)
 		defer timer.Stop()
+
 		select {
 		case <-timer.C:
 		case <-req.Context().Done():
@@ -179,6 +192,7 @@ func (r *responder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	ocspReq, err := xocsp.ParseRequest(body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -192,6 +206,7 @@ func (r *responder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		ThisUpdate:   now.Add(-time.Minute),
 		NextUpdate:   now.Add(time.Hour),
 	}
+
 	switch r.mode.Load() {
 	case respondError:
 		http.Error(w, "responder failure", http.StatusInternalServerError)
@@ -207,6 +222,7 @@ func (r *responder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/ocsp-response")
 	_, _ = w.Write(der)
 }
@@ -215,9 +231,11 @@ func (r *responder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // connections to it are refused.
 func deadURL(tb testing.TB) string {
 	tb.Helper()
+
 	srv := httptest.NewServer(http.NotFoundHandler())
 	url := srv.URL
 	srv.Close()
+
 	return url
 }
 
@@ -226,9 +244,11 @@ func deadURL(tb testing.TB) string {
 // call require, so it is safe from worker goroutines.
 func handshake(tb testing.TB, serverCfg, clientCfg *tls.Config) (tls.ConnectionState, error) {
 	tb.Helper()
+
 	cConn, sConn := net.Pipe()
 	defer func() { _ = cConn.Close() }()
 	defer func() { _ = sConn.Close() }()
+
 	deadline := time.Now().Add(handshakeDeadline)
 	_ = cConn.SetDeadline(deadline)
 	_ = sConn.SetDeadline(deadline)
@@ -236,23 +256,28 @@ func handshake(tb testing.TB, serverCfg, clientCfg *tls.Config) (tls.ConnectionS
 	ctx := tb.Context()
 	srv := tls.Server(sConn, serverCfg)
 	done := make(chan error, 1)
+
 	go func() {
 		err := srv.HandshakeContext(ctx)
 		if err != nil {
 			_ = sConn.Close()
 		}
+
 		done <- err
 	}()
 
 	cli := tls.Client(cConn, clientCfg)
+
 	cErr := cli.HandshakeContext(ctx)
 	if cErr != nil {
 		_ = cConn.Close()
 	}
+
 	sErr := <-done
 	if err := errors.Join(cErr, sErr); err != nil {
 		return tls.ConnectionState{}, err
 	}
+
 	return cli.ConnectionState(), nil
 }
 

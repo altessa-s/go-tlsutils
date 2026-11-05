@@ -20,6 +20,7 @@ func TestNew_NoOptions(t *testing.T) {
 	// New with no options creates a provider with zero-value defaults
 	v, err := tlsvault.New()
 	require.NoError(t, err)
+
 	require.NotNil(t, v)
 	defer v.Close(t.Context())
 }
@@ -59,6 +60,7 @@ func TestVault_Type(t *testing.T) {
 		tlsvault.WithRole("test-role"),
 		tlsvault.WithCommonName("test.example.com"),
 	)
+
 	require.NoError(t, err)
 	defer v.Close(t.Context())
 
@@ -72,6 +74,7 @@ func TestVault_TLSConfig(t *testing.T) {
 		tlsvault.WithRole("test-role"),
 		tlsvault.WithCommonName("test.example.com"),
 	)
+
 	require.NoError(t, err)
 	defer v.Close(t.Context())
 

@@ -31,21 +31,26 @@ func validatePrivateKeyKDF(der []byte) error {
 		Algorithm pkix.AlgorithmIdentifier
 		Data      []byte
 	}
+
 	_, err := asn1.Unmarshal(der, &info)
 	if err != nil || !info.Algorithm.Algorithm.Equal(asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 5, 13}) {
 		return ErrInvalidPrivateKey
 	}
+
 	var params struct {
 		KDF    pkix.AlgorithmIdentifier
 		Cipher pkix.AlgorithmIdentifier
 	}
+
 	rest, err := asn1.Unmarshal(info.Algorithm.Parameters.FullBytes, &params)
 	if err != nil || len(rest) != 0 {
 		return ErrInvalidPrivateKey
 	}
+
 	if err = validatePrivateKeyCipher(params.Cipher, info.Data); err != nil {
 		return err
 	}
+
 	switch {
 	case params.KDF.Algorithm.Equal(asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 5, 12}):
 		var kdf struct {
@@ -53,6 +58,7 @@ func validatePrivateKeyKDF(der []byte) error {
 			IterationCount int
 			PRF            pkix.AlgorithmIdentifier `asn1:"optional"`
 		}
+
 		rest, err = asn1.Unmarshal(params.KDF.Parameters.FullBytes, &kdf)
 		if err != nil || len(rest) != 0 || kdf.IterationCount < 1 || kdf.IterationCount > maxPBKDF2Iterations {
 			return ErrInvalidPrivateKey
@@ -64,6 +70,7 @@ func validatePrivateKeyKDF(der []byte) error {
 			R    int
 			P    int
 		}
+
 		rest, err = asn1.Unmarshal(params.KDF.Parameters.FullBytes, &kdf)
 		if err != nil || len(rest) != 0 {
 			return ErrInvalidPrivateKey
@@ -74,12 +81,14 @@ func validatePrivateKeyKDF(der []byte) error {
 			kdf.R < 1 || kdf.R > maxScryptR || kdf.P < 1 || kdf.P > maxScryptP {
 			return ErrInvalidPrivateKey
 		}
+
 		if kdf.N*kdf.R > maxScryptMemory/scryptBlockBytes || kdf.N*kdf.R > maxScryptWork/kdf.P {
 			return ErrInvalidPrivateKey
 		}
 	default:
 		return ErrInvalidPrivateKey
 	}
+
 	return nil
 }
 
@@ -93,15 +102,19 @@ func validatePrivateKeyCipher(algorithm pkix.AlgorithmIdentifier, data []byte) e
 		if !algorithm.Algorithm.Equal(cipher.OID()) {
 			continue
 		}
+
 		var iv []byte
 		if _, err := asn1.Unmarshal(algorithm.Parameters.FullBytes, &iv); err != nil {
 			return ErrInvalidPrivateKey
 		}
+
 		blockSize := cipher.IVSize()
 		if len(iv) != blockSize || len(data) == 0 || len(data)%blockSize != 0 {
 			return ErrInvalidPrivateKey
 		}
+
 		return nil
 	}
+
 	return ErrInvalidPrivateKey
 }

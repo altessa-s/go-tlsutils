@@ -72,7 +72,9 @@ func WithEndpoint(endpoint string) Option {
 		if err != nil {
 			return err
 		}
+
 		o.endpoint = u
+
 		return nil
 	}
 }
@@ -94,7 +96,9 @@ func WithRenewableToken(t *Token) Option {
 		if t == nil || t.initialToken == "" {
 			return ErrInvalidToken
 		}
+
 		o.token = t
+
 		return nil
 	}
 }

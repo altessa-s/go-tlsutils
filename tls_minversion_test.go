@@ -79,6 +79,7 @@ func TestApplyMinTLSVersion_Unknown(t *testing.T) {
 	for _, raw := range cases {
 		t.Run(raw, func(t *testing.T) {
 			t.Parallel()
+
 			cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 			err := tlsutils.ApplyMinTLSVersion(cfg, raw)
 			require.Error(t, err, "unknown minVersion %q must be rejected", raw)

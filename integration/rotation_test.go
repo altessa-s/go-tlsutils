@@ -26,6 +26,7 @@ import (
 // the new leaf.
 func TestFileProvider_RotationUnderLoad(t *testing.T) {
 	t.Parallel()
+
 	const workers = 4
 
 	pki := newTestPKI(t)
@@ -60,7 +61,9 @@ func TestFileProvider_RotationUnderLoad(t *testing.T) {
 		failMu                           sync.Mutex
 		failures                         []error
 	)
+
 	stop := make(chan struct{})
+
 	var wg sync.WaitGroup
 	for range workers {
 		wg.Go(func() {
@@ -70,14 +73,20 @@ func TestFileProvider_RotationUnderLoad(t *testing.T) {
 					return
 				default:
 				}
+
 				state, err := handshake(t, serverCfg, pki.clientConfig())
+
 				total.Add(1)
+
 				if err != nil {
 					failMu.Lock()
+
 					failures = append(failures, err)
 					failMu.Unlock()
+
 					continue
 				}
+
 				switch leaf := state.PeerCertificates[0]; {
 				case leaf.Equal(oldLeaf.Leaf):
 					oldSeen.Add(1)
@@ -89,6 +98,7 @@ func TestFileProvider_RotationUnderLoad(t *testing.T) {
 			}
 		})
 	}
+
 	stopLoad := sync.OnceFunc(func() {
 		close(stop)
 		wg.Wait()
@@ -112,6 +122,7 @@ func TestFileProvider_RotationUnderLoad(t *testing.T) {
 
 	failMu.Lock()
 	defer failMu.Unlock()
+
 	require.Empty(t, failures, "no handshake may fail during rotation (of %d)", total.Load())
 	require.Zero(t, unknown.Load())
 }

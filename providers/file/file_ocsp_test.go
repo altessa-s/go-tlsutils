@@ -55,6 +55,7 @@ func TestFile_ReloadPublishesFullyStapledConfig(t *testing.T) {
 	<-notify // initial load
 
 	stop := make(chan struct{})
+
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Go(func() {
@@ -64,6 +65,7 @@ func TestFile_ReloadPublishesFullyStapledConfig(t *testing.T) {
 					return
 				default:
 				}
+
 				cfg, cerr := f.TLSConfig()
 				if cerr != nil || cfg.GetCertificate == nil {
 					t.Error("published TLS config lacks the OCSP stapling callback")
@@ -78,12 +80,14 @@ func TestFile_ReloadPublishesFullyStapledConfig(t *testing.T) {
 		newCert, newKey, _ := testhelpers.SelfSignedCert(t)
 		require.NoError(t, os.WriteFile(keyPath, newKey, 0o600))
 		require.NoError(t, os.WriteFile(certPath, newCert, 0o600))
+
 		select {
 		case <-notify:
 		case <-time.After(10 * time.Second):
 			require.Fail(t, "timeout waiting for certificate reload")
 		}
 	}
+
 	close(stop)
 	wg.Wait()
 }

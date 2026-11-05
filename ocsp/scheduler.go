@@ -33,6 +33,7 @@ func (g *refreshGuard) tryRun(ctx context.Context, fn func(context.Context) erro
 		return nil // Already running, skip this cycle.
 	}
 	defer g.running.Store(false)
+
 	return fn(ctx)
 }
 
@@ -70,6 +71,7 @@ func (s *Stapler) RunRefreshAll(ctx context.Context) error {
 	if s.refreshAllTask.registered.Load() {
 		return ErrSchedulerManaged
 	}
+
 	return s.refreshAllTask.tryRun(ctx, s.runRefreshAllInternal)
 }
 
@@ -82,10 +84,12 @@ func (s *Stapler) runRefreshAllInternal(ctx context.Context) error {
 	type refreshItem struct {
 		cert *tls.Certificate
 	}
+
 	var items []refreshItem
 	for _, entry := range s.cache {
 		items = slices.AppendIf(items, entry.cert != nil, refreshItem{cert: entry.cert})
 	}
+
 	s.mu.RUnlock()
 
 	var errs []error

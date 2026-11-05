@@ -26,6 +26,7 @@ func TestStapler_CacheCap_EvictsOldestWhenFull(t *testing.T) {
 	s := NewOCSPStapler(WithMaxCacheEntries(2))
 
 	base := time.Now().Add(time.Hour)
+
 	s.mu.Lock()
 	s.cache["a"] = &ocspCacheEntry{nextUpdate: base}
 	s.cache["b"] = &ocspCacheEntry{nextUpdate: base.Add(time.Minute)}
@@ -37,11 +38,13 @@ func TestStapler_CacheCap_EvictsOldestWhenFull(t *testing.T) {
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	require.Len(t, s.cache, 2, "cache must respect the cap after insert+evict")
 
 	_, hasA := s.cache["a"]
 	_, hasB := s.cache["b"]
 	_, hasC := s.cache["c"]
+
 	require.False(t, hasA, "oldest entry (a) must have been evicted")
 	require.True(t, hasB, "b must survive — newer than a")
 	require.True(t, hasC, "c must survive — just inserted")
@@ -55,6 +58,7 @@ func TestStapler_CacheCap_DropsAllExpiredBeforeEvicting(t *testing.T) {
 	s := NewOCSPStapler(WithMaxCacheEntries(3))
 
 	now := time.Now()
+
 	s.mu.Lock()
 	s.cache["expired1"] = &ocspCacheEntry{nextUpdate: now.Add(-time.Hour)}
 	s.cache["expired2"] = &ocspCacheEntry{nextUpdate: now.Add(-time.Minute)}
@@ -65,6 +69,7 @@ func TestStapler_CacheCap_DropsAllExpiredBeforeEvicting(t *testing.T) {
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	require.ElementsMatch(t, []string{"live", "new"}, slices.Collect(maps.Keys(s.cache)))
 }
 
@@ -82,6 +87,7 @@ func TestStapler_CacheCap_ReplacingKeyDoesNotEvict(t *testing.T) {
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	require.ElementsMatch(t, []string{"a", "b"}, slices.Collect(maps.Keys(s.cache)))
 }
 
@@ -110,6 +116,7 @@ func TestStapler_CacheCap_ZeroIsUnbounded(t *testing.T) {
 	for i := range 10 {
 		s.cache[strconv.Itoa(i)] = &ocspCacheEntry{nextUpdate: time.Now().Add(time.Hour)}
 	}
+
 	got := len(s.cache)
 	s.mu.Unlock()
 

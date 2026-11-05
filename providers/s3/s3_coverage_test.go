@@ -25,6 +25,7 @@ import (
 func (m *mockS3Client) SetGetErr(err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.getErr = err
 }
 
@@ -39,6 +40,7 @@ func (m *headErrClient) HeadObject(ctx context.Context, input *s3.HeadObjectInpu
 	if aws.ToString(input.Key) == m.failKey {
 		return nil, errors.New("simulated head failure")
 	}
+
 	return m.mockS3Client.HeadObject(ctx, input, opts...)
 }
 
@@ -68,6 +70,7 @@ func (zeroReader) Read(p []byte) (int, error) {
 	for i := range p {
 		p[i] = 0
 	}
+
 	return len(p), nil
 }
 
@@ -140,6 +143,7 @@ func TestNew_ParseCertificateError(t *testing.T) {
 // surfaces the read error instead of being swallowed.
 func TestNew_CertBodyReadError(t *testing.T) {
 	t.Parallel()
+
 	_, err := tlss3.New("my-bucket", "certs/server.crt", "certs/server.key", "", tlss3.WithS3Client(bodyErrClient{}))
 	require.Error(t, err)
 }
@@ -148,6 +152,7 @@ func TestNew_CertBodyReadError(t *testing.T) {
 // provider's size cap is rejected rather than read fully into memory.
 func TestNew_DownloadExceedsSizeCap(t *testing.T) {
 	t.Parallel()
+
 	_, err := tlss3.New("my-bucket", "certs/server.crt", "certs/server.key", "", tlss3.WithS3Client(oversizedBodyClient{}))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "exceeds")

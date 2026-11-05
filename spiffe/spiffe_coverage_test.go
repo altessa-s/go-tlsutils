@@ -23,6 +23,7 @@ func TestNew_UnreachableWorkloadAPI(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer cancel()
+
 	p, err := spiffe.New(ctx,
 		spiffe.WithAuthorizer(anyAuthorizer()),
 		spiffe.WithAuthorizer(nil), // ignored: keeps the previous authorizer

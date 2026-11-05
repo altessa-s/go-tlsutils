@@ -59,6 +59,7 @@ func TestVaultPKI(t *testing.T) {
 
 	hsCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
+
 	state := handshake(t, hsCtx, serverCfg, clientConfig(roots))
 
 	requireVerifiedTo(t, state, root)

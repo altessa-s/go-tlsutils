@@ -24,10 +24,12 @@ import (
 // GenerateRSAKey generates an RSA private key of the given bit size for testing.
 func GenerateRSAKey(tb testing.TB, bits int) *rsa.PrivateKey {
 	tb.Helper()
+
 	key, err := rsa.GenerateKey(rand.Reader, bits)
 	if err != nil {
 		tb.Fatalf("failed to generate RSA key: %v", err)
 	}
+
 	return key
 }
 
@@ -36,30 +38,36 @@ func GenerateRSAKey(tb testing.TB, bits int) *rsa.PrivateKey {
 func GenerateRSAKeyPEM(tb testing.TB, bits int) []byte {
 	tb.Helper()
 	key := GenerateRSAKey(tb, bits)
+
 	der, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
 		tb.Fatalf("failed to marshal private key: %v", err)
 	}
+
 	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 }
 
 // GenerateECDSAKey generates an ECDSA private key on the given curve for testing.
 func GenerateECDSAKey(tb testing.TB, curve elliptic.Curve) *ecdsa.PrivateKey {
 	tb.Helper()
+
 	key, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
 		tb.Fatalf("failed to generate ECDSA key: %v", err)
 	}
+
 	return key
 }
 
 // GenerateEd25519Key generates an Ed25519 key pair for testing.
 func GenerateEd25519Key(tb testing.TB) (ed25519.PublicKey, ed25519.PrivateKey) {
 	tb.Helper()
+
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		tb.Fatalf("failed to generate Ed25519 key: %v", err)
 	}
+
 	return pub, priv
 }
 
@@ -128,6 +136,7 @@ func SelfSignedCertWithOCSP(tb testing.TB, ocspServers []string) (certPEM, keyPE
 	if err != nil {
 		tb.Fatalf("failed to marshal leaf key: %v", err)
 	}
+
 	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: leafKeyDER})
 
 	// Build tls.Certificate with full chain
@@ -150,11 +159,14 @@ func WriteTempCertFiles(tb testing.TB, certPEM, keyPEM []byte) (certPath, keyPat
 	dir := tb.TempDir()
 	certPath = filepath.Join(dir, "cert.pem")
 	keyPath = filepath.Join(dir, "key.pem")
+
 	if err := os.WriteFile(certPath, certPEM, 0o600); err != nil { //nolint:mnd // file permission
 		tb.Fatalf("failed to write cert file: %v", err)
 	}
+
 	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil { //nolint:mnd // file permission
 		tb.Fatalf("failed to write key file: %v", err)
 	}
+
 	return
 }

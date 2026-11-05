@@ -42,6 +42,7 @@ func (s *staticSource) Close() error { return nil }
 // makeSVID mints a CA-signed SVID whose sole URI SAN is the given SPIFFE ID.
 func makeSVID(t *testing.T, ca *testhelpers.CA, idStr string) *x509svid.SVID {
 	t.Helper()
+
 	id := spiffeid.RequireFromString(idStr)
 	uri, err := url.Parse(id.String())
 	require.NoError(t, err)
@@ -51,6 +52,7 @@ func makeSVID(t *testing.T, ca *testhelpers.CA, idStr string) *x509svid.SVID {
 	)
 	signer, ok := cert.PrivateKey.(crypto.Signer)
 	require.True(t, ok)
+
 	return &x509svid.SVID{ID: id, Certificates: []*x509.Certificate{cert.Leaf}, PrivateKey: signer}
 }
 
@@ -58,15 +60,19 @@ func makeSVID(t *testing.T, ca *testhelpers.CA, idStr string) *x509svid.SVID {
 // and returns its address.
 func startServer(t *testing.T, provider *spiffe.Provider) string {
 	t.Helper()
+
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+
 	srv := &http.Server{
 		Handler:           http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }),
 		TLSConfig:         provider.MTLSServerConfig(),
 		ReadHeaderTimeout: time.Second,
 	}
 	go func() { _ = srv.ServeTLS(ln, "", "") }()
+
 	t.Cleanup(func() { _ = srv.Close() })
+
 	return ln.Addr().String()
 }
 
@@ -75,6 +81,7 @@ func startServer(t *testing.T, provider *spiffe.Provider) string {
 // accept each other.
 func TestMTLSHandshake(t *testing.T) {
 	t.Parallel()
+
 	td := spiffeid.RequireTrustDomainFromString("example.org")
 	ca := testhelpers.NewCA(t)
 	bundle := x509bundle.FromX509Authorities(td, []*x509.Certificate{ca.Cert})
@@ -95,7 +102,9 @@ func TestMTLSHandshake(t *testing.T) {
 
 	resp, err := httpClient.Get("https://" + addr)
 	require.NoError(t, err)
+
 	defer resp.Body.Close()
+
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.Equal(t, "ok", string(body))
@@ -106,6 +115,7 @@ func TestMTLSHandshake(t *testing.T) {
 // the certificate chains to a trusted CA.
 func TestMTLSHandshakeRejectsUnauthorizedPeer(t *testing.T) {
 	t.Parallel()
+
 	td := spiffeid.RequireTrustDomainFromString("example.org")
 	ca := testhelpers.NewCA(t)
 	bundle := x509bundle.FromX509Authorities(td, []*x509.Certificate{ca.Cert})
@@ -129,5 +139,6 @@ func TestMTLSHandshakeRejectsUnauthorizedPeer(t *testing.T) {
 	if err == nil {
 		_ = resp.Body.Close()
 	}
+
 	require.Error(t, err)
 }

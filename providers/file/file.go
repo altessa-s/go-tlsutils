@@ -91,6 +91,7 @@ func NewWithCertAndKey(certFile, keyFile, keyPassword string, opts ...Option) (*
 			f.cancel()
 			return nil, err
 		}
+
 		f.watcher = watcher
 
 		// Add files to watcher
@@ -144,6 +145,7 @@ func (f *File) TLSConfig() (*tls.Config, error) {
 
 	// Return a copy to prevent modifications
 	config := f.tlsConfig.Clone()
+
 	return config, nil
 }
 
@@ -163,7 +165,9 @@ func (f *File) GetClientCertificate(*tls.CertificateRequestInfo) (*tls.Certifica
 	if f.cert == nil {
 		return nil, errors.New("TLS certificate not loaded")
 	}
+
 	cert := *f.cert
+
 	return &cert, nil
 }
 
@@ -201,6 +205,7 @@ func (f *File) cleanup() error {
 	if f.watcher != nil {
 		return f.watcher.Close()
 	}
+
 	return nil
 }
 
@@ -236,7 +241,9 @@ func (f *File) watchFiles() {
 	// Debounce timer to avoid multiple reloads for rapid file changes.
 	// Implemented without time.AfterFunc to avoid a separate goroutine that can race with shutdown/cleanup.
 	var debounceTimer *time.Timer
+
 	const debounceDelay = 100 * time.Millisecond
+
 	debounceC := (<-chan time.Time)(nil)
 
 	for {
@@ -245,6 +252,7 @@ func (f *File) watchFiles() {
 			if debounceTimer != nil {
 				debounceTimer.Stop()
 			}
+
 			return
 
 		case event, ok := <-f.watcher.Events:
@@ -276,6 +284,7 @@ func (f *File) watchFiles() {
 			if !ok {
 				return
 			}
+
 			f.logger.ErrorContext(f.ctx, "file watcher error", slog.Any("error", err))
 		}
 	}

@@ -16,6 +16,7 @@ import (
 // a white-box test constructing the struct directly.
 func TestS3_TLSConfig_NotYetLoaded(t *testing.T) {
 	t.Parallel()
+
 	p := &S3{}
 
 	_, err := p.TLSConfig()

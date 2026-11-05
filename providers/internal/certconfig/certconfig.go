@@ -29,6 +29,7 @@ func Build(ctx context.Context, cert *tls.Certificate, stapler tlsutils.OCSPStap
 			logger.WarnContext(ctx, "failed to apply OCSP stapling to reloaded certificate", slog.Any("error", err))
 		}
 	}
+
 	return cfg
 }
 
@@ -37,6 +38,7 @@ func Notify(ch chan<- struct{}) {
 	if ch == nil {
 		return
 	}
+
 	select {
 	case ch <- struct{}{}:
 	default:

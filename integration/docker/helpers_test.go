@@ -40,6 +40,7 @@ func tryHandshake(ctx context.Context, server, client *tls.Config) (tls.Connecti
 	defer func() { _ = ln.Close() }()
 
 	srvErr := make(chan error, 1)
+
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -47,19 +48,23 @@ func tryHandshake(ctx context.Context, server, client *tls.Config) (tls.Connecti
 			return
 		}
 		defer func() { _ = conn.Close() }()
+
 		tlsConn, ok := conn.(*tls.Conn)
 		if !ok {
 			srvErr <- errNotTLS
 			return
 		}
+
 		srvErr <- tlsConn.HandshakeContext(ctx)
 	}()
 
 	dialer := tls.Dialer{Config: client}
+
 	conn, err := dialer.DialContext(ctx, "tcp", ln.Addr().String())
 	if err != nil {
 		return tls.ConnectionState{}, err
 	}
+
 	defer func() { _ = conn.Close() }()
 
 	if err := <-srvErr; err != nil {
@@ -70,14 +75,17 @@ func tryHandshake(ctx context.Context, server, client *tls.Config) (tls.Connecti
 	if !ok {
 		return tls.ConnectionState{}, errNotTLS
 	}
+
 	return tlsConn.ConnectionState(), nil
 }
 
 // handshake is [tryHandshake] that fails the test on error.
 func handshake(tb testing.TB, ctx context.Context, server, client *tls.Config) tls.ConnectionState {
 	tb.Helper()
+
 	state, err := tryHandshake(ctx, server, client)
 	require.NoError(tb, err, "TLS handshake")
+
 	return state
 }
 
@@ -94,11 +102,13 @@ func clientConfig(roots *x509.CertPool) *tls.Config {
 // parsePEMCert decodes the first certificate in pemData.
 func parsePEMCert(tb testing.TB, pemData []byte) *x509.Certificate {
 	tb.Helper()
+
 	block, _ := pem.Decode(pemData)
 	require.NotNil(tb, block, "no PEM block")
 	require.Equal(tb, "CERTIFICATE", block.Type)
 	cert, err := x509.ParseCertificate(block.Bytes)
 	require.NoError(tb, err)
+
 	return cert
 }
 
@@ -154,6 +164,7 @@ func newTestCA(tb testing.TB) *testCA {
 // PEM of the leaf followed by the intermediate, and the PKCS#8 key PEM.
 func (ca *testCA) issueLeaf(tb testing.TB) (leaf *x509.Certificate, chainPEM, keyPEM []byte) {
 	tb.Helper()
+
 	ca.serial++
 	key := newKey(tb)
 	leaf = createCert(tb, &x509.Certificate{
@@ -169,26 +180,32 @@ func (ca *testCA) issueLeaf(tb testing.TB) (leaf *x509.Certificate, chainPEM, ke
 	chainPEM = append(pemEncode("CERTIFICATE", leaf.Raw), pemEncode("CERTIFICATE", ca.inter.Raw)...)
 	der, err := x509.MarshalPKCS8PrivateKey(key)
 	require.NoError(tb, err)
+
 	return leaf, chainPEM, pemEncode("PRIVATE KEY", der)
 }
 
 func newKey(tb testing.TB) *ecdsa.PrivateKey {
 	tb.Helper()
+
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(tb, err)
+
 	return key
 }
 
 // createCert signs tmpl with signerKey; a nil parent self-signs.
 func createCert(tb testing.TB, tmpl, parent *x509.Certificate, key, signerKey *ecdsa.PrivateKey) *x509.Certificate {
 	tb.Helper()
+
 	if parent == nil {
 		parent = tmpl
 	}
+
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, parent, key.Public(), signerKey)
 	require.NoError(tb, err)
 	cert, err := x509.ParseCertificate(der)
 	require.NoError(tb, err)
+
 	return cert
 }
 

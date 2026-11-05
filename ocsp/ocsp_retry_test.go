@@ -24,6 +24,7 @@ func (m *mockRetryPolicy) ShouldRetry(_ error) bool      { return m.shouldRetry 
 
 func TestExecuteWithRetry_NilPolicy(t *testing.T) {
 	t.Parallel()
+
 	calls := 0
 	err := ExecuteWithRetry(t.Context(), nil, func() error {
 		calls++
@@ -35,6 +36,7 @@ func TestExecuteWithRetry_NilPolicy(t *testing.T) {
 
 func TestExecuteWithRetry_Success(t *testing.T) {
 	t.Parallel()
+
 	policy := &mockRetryPolicy{maxAttempts: 3, nextDelay: time.Millisecond, shouldRetry: true}
 	err := ExecuteWithRetry(t.Context(), policy, func() error {
 		return nil
@@ -44,6 +46,7 @@ func TestExecuteWithRetry_Success(t *testing.T) {
 
 func TestExecuteWithRetry_PermanentError(t *testing.T) {
 	t.Parallel()
+
 	testErr := errors.New("permanent error")
 	policy := &mockRetryPolicy{maxAttempts: 3, nextDelay: time.Millisecond, shouldRetry: false}
 	calls := 0
@@ -57,6 +60,7 @@ func TestExecuteWithRetry_PermanentError(t *testing.T) {
 
 func TestExecuteWithRetry_WithOnRetry(t *testing.T) {
 	t.Parallel()
+
 	attempts := 0
 	policy := &mockRetryPolicy{maxAttempts: 2, nextDelay: time.Millisecond, shouldRetry: true}
 

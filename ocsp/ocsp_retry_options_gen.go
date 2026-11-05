@@ -11,6 +11,10 @@ import (
 type RetryOption func(o *retryOptions)
 
 // WithOnRetry sets the onRetry option.
+//
+// onRetry is invoked before each retry attempt with the zero-based
+// attempt that failed, its error, and the delay before the next one.
+// Nil disables it.
 func WithOnRetry(v coreretry.OnRetryFunc) RetryOption {
 	return func(o *retryOptions) {
 		o.onRetry = v

@@ -53,6 +53,7 @@ func newFakeS3(bucket string) *fakeS3 {
 func (f *fakeS3) put(objects map[string][]byte) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
 	for key, body := range objects {
 		f.version++
 		f.objects[key] = fakeObject{body: bytes.Clone(body), etag: strconv.Quote(strconv.Itoa(f.version))}
@@ -62,10 +63,12 @@ func (f *fakeS3) put(objects map[string][]byte) {
 func (f *fakeS3) lookup(bucket, key *string) (fakeObject, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
 	obj, ok := f.objects[aws.ToString(key)]
 	if !ok || aws.ToString(bucket) != f.bucket {
 		return fakeObject{}, errNoSuchKey
 	}
+
 	return obj, nil
 }
 
@@ -74,6 +77,7 @@ func (f *fakeS3) GetObject(_ context.Context, in *s3.GetObjectInput, _ ...func(*
 	if err != nil {
 		return nil, err
 	}
+
 	return &s3.GetObjectOutput{Body: io.NopCloser(bytes.NewReader(obj.body)), ETag: aws.String(obj.etag)}, nil
 }
 
@@ -82,6 +86,7 @@ func (f *fakeS3) HeadObject(_ context.Context, in *s3.HeadObjectInput, _ ...func
 	if err != nil {
 		return nil, err
 	}
+
 	return &s3.HeadObjectOutput{ETag: aws.String(obj.etag)}, nil
 }
 
@@ -90,6 +95,7 @@ func (f *fakeS3) HeadObject(_ context.Context, in *s3.HeadObjectInput, _ ...func
 // that an ETag change picked up by polling swaps in the new leaf.
 func TestS3Provider_StapledHandshakeAndReload(t *testing.T) {
 	t.Parallel()
+
 	const (
 		bucket  = "certs"
 		certKey = "tls/server.crt"

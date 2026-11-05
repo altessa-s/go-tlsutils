@@ -85,10 +85,12 @@ type CA struct {
 // fields, e.g. [WithCommonName] or [WithSubjectKeyID].
 func NewCA(tb testing.TB, opts ...CertOption) *CA {
 	tb.Helper()
+
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		tb.Fatalf("generate CA key: %v", err)
 	}
+
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
 		Subject:               pkix.Name{CommonName: "test-ca"},
@@ -101,18 +103,22 @@ func NewCA(tb testing.TB, opts ...CertOption) *CA {
 	for _, opt := range opts {
 		opt(tmpl)
 	}
+
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
 	if err != nil {
 		tb.Fatalf("create CA certificate: %v", err)
 	}
+
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
 		tb.Fatalf("parse CA certificate: %v", err)
 	}
+
 	pool := x509.NewCertPool()
 	pool.AddCert(cert)
 	ca := &CA{Cert: cert, Key: key, Pool: pool}
 	ca.serial.Store(1) // the CA itself used serial 1
+
 	return ca
 }
 
@@ -125,10 +131,12 @@ func NewCA(tb testing.TB, opts ...CertOption) *CA {
 // private key can use cert.Leaf and cert.PrivateKey.
 func (ca *CA) SignLeaf(tb testing.TB, opts ...CertOption) tls.Certificate {
 	tb.Helper()
+
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		tb.Fatalf("generate leaf key: %v", err)
 	}
+
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(ca.serial.Add(1)),
 		NotBefore:    time.Now().Add(-time.Hour),
@@ -138,13 +146,16 @@ func (ca *CA) SignLeaf(tb testing.TB, opts ...CertOption) tls.Certificate {
 	for _, opt := range opts {
 		opt(tmpl)
 	}
+
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.Cert, key.Public(), ca.Key)
 	if err != nil {
 		tb.Fatalf("create leaf certificate: %v", err)
 	}
+
 	leaf, err := x509.ParseCertificate(der)
 	if err != nil {
 		tb.Fatalf("parse leaf certificate: %v", err)
 	}
+
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}
 }
