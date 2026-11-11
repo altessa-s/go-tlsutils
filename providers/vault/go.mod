@@ -2,7 +2,7 @@ module github.com/altessa-s/go-tlsutils/providers/vault
 
 go 1.27.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 // Development: build against the root module in this checkout. Consumers
 // ignore this directive; releases require a tagged root version above.

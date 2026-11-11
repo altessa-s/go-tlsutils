@@ -2,7 +2,7 @@ module github.com/altessa-s/go-tlsutils/integration
 
 go 1.27.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 // Test-only module: build against the modules in this checkout.
 replace (
