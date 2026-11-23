@@ -22,8 +22,8 @@ require (
 )
 
 require (
-	github.com/altessa-s/go-atlas-core v0.3.3 // indirect
-	github.com/altessa-s/go-atlas-net v0.2.3 // indirect
+	github.com/altessa-s/go-atlas-core v0.3.5 // indirect
+	github.com/altessa-s/go-atlas-net v0.3.6 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.26 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.33.16 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.16 // indirect
