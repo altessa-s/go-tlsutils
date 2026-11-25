@@ -84,6 +84,11 @@ linters:
   exclusions:
     generated: lax
     rules:
+      # Keep the adapted ACME protocol code close to upstream for updates.
+      - path: providers/letsencrypt/internal/autocert/autocert\.go
+        linters:
+          - gocognit
+          - wsl_v5
       # Tests run only the formatting, dead-code and simple correctness
       # linters (see CONTRIBUTING "Formatting"); every other linter skips them.
       - path: _test\.go

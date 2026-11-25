@@ -58,8 +58,18 @@ const DefaultMaxCacheEntries = 4096
 // indefinitely.
 const DefaultMaxResponseAge = 24 * time.Hour
 
+// HTTPDoer executes OCSP requests. It must be safe for concurrent use and
+// honor the request context. Its response and error follow the http.Client.Do
+// contract.
+type HTTPDoer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
 type options struct {
-	httpClient  *http.Client
+	// WithHTTPClient sets the client used for OCSP requests. Supply a client
+	// that enforces your egress policy and sets its own timeouts. Nil clients
+	// are ignored. The default client uses [DefaultHTTPTimeout].
+	httpClient  HTTPDoer    `optgen:"notnil"`
 	retryPolicy RetryPolicy `optgen:"notnil"`
 	logger      *slog.Logger
 	// enableCompression requests gzip-encoded responder replies (decoded with

@@ -3,7 +3,8 @@
 // the LICENSE file.
 
 // Package tlsletsencrypt provides Let's Encrypt TLS certificate provider using HTTP-01 ACME challenges.
-// Wraps autocert for automatic certificate management with renewal and caching support.
+// It manages certificate issuance, renewal, and caching. Call [LetsEncrypt.Close]
+// to cancel issuance and renewal and shut down the challenge server.
 //
 // Example:
 //
@@ -11,7 +12,7 @@
 //		tlsletsencrypt.WithDomains("example.com"),
 //		tlsletsencrypt.WithEmail("admin@example.com"),
 //	)
-//	defer provider.Close()
+//	defer provider.Close(context.Background())
 //	go provider.StartHTTPServer(":80", nil)
 //	tlsConfig, _ := provider.TLSConfig()
 package tlsletsencrypt

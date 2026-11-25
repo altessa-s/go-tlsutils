@@ -5,7 +5,6 @@ package ocsp
 
 import (
 	"log/slog"
-	"net/http"
 	"reflect"
 	"time"
 )
@@ -24,11 +23,18 @@ func WithCompression() Option {
 	}
 }
 
-// WithHTTPClient sets the httpClient option.
-func WithHTTPClient(v *http.Client) Option {
+// WithHTTPClient sets the client used for OCSP requests. Supply a client
+// that enforces your egress policy and sets its own timeouts. Nil clients
+// are ignored. The default client uses [DefaultHTTPTimeout].
+func WithHTTPClient(v HTTPDoer) Option {
 	return func(o *options) {
-		if v == nil {
+		switch rv := reflect.ValueOf(v); rv.Kind() {
+		case reflect.Invalid:
 			return
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
+			if rv.IsNil() {
+				return
+			}
 		}
 		o.httpClient = v
 	}

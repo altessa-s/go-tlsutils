@@ -20,6 +20,8 @@
 //     Config.Certificates into the wrapped GetCertificate
 //   - Optional gzip transfer encoding for responder replies (WithCompression)
 //   - Configurable retry policies for network failures
+//   - HTTP client injection through [WithHTTPClient] for egress policy and
+//     timeouts. The default client uses [DefaultHTTPTimeout].
 //   - Thread-safe concurrent operations
 //   - Structured logging support
 //

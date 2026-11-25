@@ -20,15 +20,17 @@ import (
 	coreerrs "github.com/altessa-s/go-atlas-core/errors"
 	tlsutils "github.com/altessa-s/go-tlsutils"
 	tlsproviders "github.com/altessa-s/go-tlsutils/providers"
+	managedautocert "github.com/altessa-s/go-tlsutils/providers/letsencrypt/internal/autocert"
 )
 
 // LetsEncrypt provides automatic TLS certificate management using the ACME protocol
 // and Let's Encrypt certificate authority. Use New to create a new instance.
 type LetsEncrypt struct {
 	opts    *options
-	am      *autocert.Manager
+	am      *managedautocert.Manager
 	httpSrv *http.Server
 	mu      sync.Mutex
+	closed  bool
 }
 
 // New creates a new Let's Encrypt TLS certificate provider.
@@ -62,7 +64,7 @@ func New(opt ...Option) (*LetsEncrypt, error) {
 }
 
 func (le *LetsEncrypt) initAutocertManager() {
-	am := &autocert.Manager{
+	am := &managedautocert.Manager{
 		Prompt:     autocert.AcceptTOS,
 		Email:      le.opts.email,
 		HostPolicy: autocert.HostWhitelist(le.opts.domains...),
@@ -104,6 +106,9 @@ var (
 	ErrNilHTTPServerContext = errors.New("acme http server: context cannot be nil")
 	// ErrHTTPServerStarted is returned when attempting to start an already running HTTP server.
 	ErrHTTPServerStarted = errors.New("acme http server: already started")
+	// ErrClosed is returned when a closed provider is asked to start a
+	// server or retrieve a certificate.
+	ErrClosed = managedautocert.ErrClosed
 )
 
 // listenAddr resolves the address the ACME HTTP server listens on. A port in
@@ -142,6 +147,11 @@ func (le *LetsEncrypt) StartHTTPServerWithContext(ctx context.Context, addr stri
 	}
 
 	le.mu.Lock()
+	if le.closed {
+		le.mu.Unlock()
+		return ErrClosed
+	}
+
 	if le.httpSrv != nil {
 		le.mu.Unlock()
 		return ErrHTTPServerStarted
@@ -253,9 +263,9 @@ func (le *LetsEncrypt) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certific
 	return le.am.GetCertificate(hello)
 }
 
-// Close stops the HTTP server gracefully using the provided context.
-// The context controls the graceful shutdown timeout.
-// Returns context.DeadlineExceeded if shutdown doesn't complete within the context timeout.
+// Close cancels certificate issuance and renewal and shuts down the HTTP
+// challenge server. It waits for manager operations to stop up to the context
+// deadline. The provider stays closed after Close returns.
 //
 // Example:
 //
@@ -264,15 +274,35 @@ func (le *LetsEncrypt) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certific
 //	provider.Close(ctx)
 func (le *LetsEncrypt) Close(ctx context.Context) error {
 	le.mu.Lock()
+	le.closed = true
 	srv := le.httpSrv
-	le.httpSrv = nil
+	done := le.am.Stop()
 	le.mu.Unlock()
 
+	var shutdownErr error
 	if srv != nil {
-		return srv.Shutdown(ctx)
+		if shutdownErr = srv.Shutdown(ctx); shutdownErr != nil {
+			_ = srv.Close()
+		}
 	}
 
-	return nil
+	// Prefer a completed shutdown even if the caller's context has expired.
+	select {
+	case <-done:
+		return shutdownErr
+	default:
+	}
+
+	select {
+	case <-done:
+		return shutdownErr
+	case <-ctx.Done():
+		if shutdownErr != nil {
+			return shutdownErr
+		}
+
+		return ctx.Err()
+	}
 }
 
 // Type returns the provider type identifier.
