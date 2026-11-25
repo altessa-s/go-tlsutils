@@ -20,17 +20,22 @@ import (
 	coreerrs "github.com/altessa-s/go-atlas-core/errors"
 	tlsutils "github.com/altessa-s/go-tlsutils"
 	tlsproviders "github.com/altessa-s/go-tlsutils/providers"
-	managedautocert "github.com/altessa-s/go-tlsutils/providers/letsencrypt/internal/autocert"
 )
 
 // LetsEncrypt provides automatic TLS certificate management using the ACME protocol
 // and Let's Encrypt certificate authority. Use New to create a new instance.
 type LetsEncrypt struct {
 	opts    *options
-	am      *managedautocert.Manager
-	httpSrv *http.Server
+	am      *autocert.Manager
+	httpSrv *challengeServer
 	mu      sync.Mutex
 	closed  bool
+}
+
+type challengeServer struct {
+	server       http.Server
+	cancelListen context.CancelFunc
+	done         chan struct{}
 }
 
 // New creates a new Let's Encrypt TLS certificate provider.
@@ -64,7 +69,7 @@ func New(opt ...Option) (*LetsEncrypt, error) {
 }
 
 func (le *LetsEncrypt) initAutocertManager() {
-	am := &managedautocert.Manager{
+	am := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
 		Email:      le.opts.email,
 		HostPolicy: autocert.HostWhitelist(le.opts.domains...),
@@ -108,7 +113,7 @@ var (
 	ErrHTTPServerStarted = errors.New("acme http server: already started")
 	// ErrClosed is returned when a closed provider is asked to start a
 	// server or retrieve a certificate.
-	ErrClosed = managedautocert.ErrClosed
+	ErrClosed = errors.New("letsencrypt: provider is closed")
 )
 
 // listenAddr resolves the address the ACME HTTP server listens on. A port in
@@ -157,63 +162,81 @@ func (le *LetsEncrypt) StartHTTPServerWithContext(ctx context.Context, addr stri
 		return ErrHTTPServerStarted
 	}
 
-	listener, err := net.Listen("tcp", listenAddr(addr)) //nolint:noctx
-	if err != nil {
-		le.mu.Unlock()
-		return coreerrs.Wrap(err, "acme http server") //nolint:err113
-	}
-
-	srv := &http.Server{
-		Handler:        le.am.HTTPHandler(fallback),
-		MaxHeaderBytes: 1 << 16,           //nolint:mnd
-		ReadTimeout:    30 * time.Second,  //nolint:mnd
-		WriteTimeout:   30 * time.Second,  //nolint:mnd
-		IdleTimeout:    120 * time.Second, //nolint:mnd
+	// Reserve the server before binding so Close can cancel an in-progress listen.
+	listenCtx, cancelListen := context.WithCancel(ctx)
+	srv := &challengeServer{
+		server: http.Server{
+			MaxHeaderBytes: 1 << 16,           //nolint:mnd
+			ReadTimeout:    30 * time.Second,  //nolint:mnd
+			WriteTimeout:   30 * time.Second,  //nolint:mnd
+			IdleTimeout:    120 * time.Second, //nolint:mnd
+		},
+		cancelListen: cancelListen,
+		done:         make(chan struct{}),
 	}
 	le.httpSrv = srv
 	le.mu.Unlock()
 
-	// served is closed once Serve returns, so the shutdown watcher below also
-	// exits when Close stops the server before ctx is canceled.
-	served := make(chan struct{})
+	var config net.ListenConfig
 
-	// ACME HTTP server
-	go func() {
-		defer close(served)
-		defer func() {
-			le.mu.Lock()
-			if le.httpSrv == srv {
-				le.httpSrv = nil
-			}
-			le.mu.Unlock()
-		}()
+	listener, err := config.Listen(listenCtx, "tcp", listenAddr(addr))
 
-		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			le.opts.logger.ErrorContext(ctx, "acme http server stopped with error", slog.Any("error", err))
-		}
-	}()
+	cancelListen()
 
-	// Stop server on context cancellation.
-	go func() {
-		select {
-		case <-ctx.Done():
-		case <-served:
-			return
-		}
+	if err != nil {
+		le.finishHTTPServer(srv)
+		return coreerrs.Wrap(err, "acme http server") //nolint:err113
+	}
 
-		// Inherit values from the original context (tracing/log fields), but don't inherit cancellation.
+	srv.server.Handler = le.am.HTTPHandler(fallback)
+	shutdownDone := make(chan struct{})
+	stopShutdown := context.AfterFunc(ctx, func() {
+		defer close(shutdownDone)
+		// Keep logging and tracing values while allowing time for graceful shutdown.
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), le.opts.httpShutdownTimeout)
 		defer cancel()
 
-		// Try graceful shutdown first, then hard close.
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			_ = srv.Close() // #nosec G104 -- best effort close
+		_ = srv.shutdown(shutdownCtx)
+	})
+
+	go func() {
+		defer le.finishHTTPServer(srv)
+
+		if err := srv.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			_ = srv.server.Close() // #nosec G104 -- best effort close
+
+			le.opts.logger.ErrorContext(ctx, "acme http server stopped with error", slog.Any("error", err))
+		}
+
+		if !stopShutdown() {
+			<-shutdownDone
 		}
 	}()
 
 	le.opts.logger.InfoContext(ctx, "acme HTTP server started", slog.String("address", listener.Addr().String()))
 
 	return nil
+}
+
+func (le *LetsEncrypt) finishHTTPServer(srv *challengeServer) {
+	le.mu.Lock()
+	defer le.mu.Unlock()
+
+	// Keep the server available to concurrent Close calls while it drains.
+	if !le.closed {
+		le.httpSrv = nil
+	}
+
+	close(srv.done)
+}
+
+func (srv *challengeServer) shutdown(ctx context.Context) error {
+	err := srv.server.Shutdown(ctx)
+	if err != nil {
+		_ = srv.server.Close() // #nosec G104 -- best effort close
+	}
+
+	return err
 }
 
 // HTTPHandler returns an HTTP handler that responds to ACME HTTP-01 challenges.
@@ -246,7 +269,8 @@ func (le *LetsEncrypt) TLSConfig() (*tls.Config, error) {
 	// Get autocert manager's TLS config
 	tlsConfig := le.am.TLSConfig()
 
-	// Apply secure defaults from tlsutils
+	tlsConfig.GetCertificate = le.GetCertificate
+	// Apply secure defaults from tlsutils.
 	tlsConfig.MinVersion = tls.VersionTLS12
 	tlsConfig.CipherSuites = tlsutils.DefaultTLSConfig().CipherSuites
 
@@ -260,12 +284,22 @@ func (le *LetsEncrypt) TLSConfig() (*tls.Config, error) {
 //
 //	config := &tls.Config{GetCertificate: provider.GetCertificate}
 func (le *LetsEncrypt) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	le.mu.Lock()
+	closed := le.closed
+	le.mu.Unlock()
+
+	if closed {
+		return nil, ErrClosed
+	}
+
 	return le.am.GetCertificate(hello)
 }
 
-// Close cancels certificate issuance and renewal and shuts down the HTTP
-// challenge server. It waits for manager operations to stop up to the context
-// deadline. The provider stays closed after Close returns.
+// Close stops the HTTP challenge server and waits for its goroutines until ctx
+// is done. If graceful shutdown fails, Close force-closes active connections.
+// The provider rejects new server starts and certificate requests after closing.
+// The upstream autocert API has no way to stop its internal renewal timer once
+// started. The timer continues running until process exit.
 //
 // Example:
 //
@@ -276,33 +310,29 @@ func (le *LetsEncrypt) Close(ctx context.Context) error {
 	le.mu.Lock()
 	le.closed = true
 	srv := le.httpSrv
-	done := le.am.Stop()
 	le.mu.Unlock()
 
-	var shutdownErr error
-	if srv != nil {
-		if shutdownErr = srv.Shutdown(ctx); shutdownErr != nil {
-			_ = srv.Close()
-		}
+	if srv == nil {
+		return nil
 	}
 
-	// Prefer a completed shutdown even if the caller's context has expired.
-	select {
-	case <-done:
-		return shutdownErr
-	default:
+	srv.cancelListen()
+
+	if err := srv.shutdown(ctx); err != nil {
+		return err
 	}
 
 	select {
-	case <-done:
-		return shutdownErr
+	case <-srv.done:
 	case <-ctx.Done():
-		if shutdownErr != nil {
-			return shutdownErr
-		}
-
 		return ctx.Err()
 	}
+
+	le.mu.Lock()
+	le.httpSrv = nil
+	le.mu.Unlock()
+
+	return nil
 }
 
 // Type returns the provider type identifier.

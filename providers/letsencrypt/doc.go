@@ -4,7 +4,9 @@
 
 // Package tlsletsencrypt provides Let's Encrypt TLS certificate provider using HTTP-01 ACME challenges.
 // It manages certificate issuance, renewal, and caching. Call [LetsEncrypt.Close]
-// to cancel issuance and renewal and shut down the challenge server.
+// to shut down the provider's HTTP challenge server and wait for its goroutines.
+// The upstream autocert API has no way to stop its internal renewal timer once
+// started. The timer continues running until process exit.
 //
 // Example:
 //

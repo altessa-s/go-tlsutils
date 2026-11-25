@@ -5,101 +5,94 @@
 package tlsletsencrypt_test
 
 import (
+	"context"
 	"crypto/tls"
-	"crypto/x509"
-	"encoding/pem"
+	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
-	"golang.org/x/crypto/acme"
-
-	"github.com/altessa-s/go-tlsutils/internal/testhelpers"
-
 	tlsletsencrypt "github.com/altessa-s/go-tlsutils/providers/letsencrypt"
 )
 
-type acmeTransportFunc func(*http.Request) (*http.Response, error)
-
-func (f acmeTransportFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
-
-func TestClose_StopsCertificateRenewal(t *testing.T) {
+func TestClose_ForceClosesActiveChallengeConnection(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct {
-		name     string
-		validFor time.Duration
-		renewing bool
-	}{
-		{name: "waiting on timer", validFor: 72 * time.Hour},
-		{name: "in-flight renewal", validFor: 24 * time.Hour, renewing: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+	le := newProvider(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
 
-			synctest.Test(t, func(t *testing.T) {
-				const domain = "example.com"
+	addr := listener.Addr().String()
+	require.NoError(t, listener.Close())
 
-				dir := t.TempDir()
-				ca := testhelpers.NewCA(t)
-				cert := ca.SignLeaf(t, testhelpers.WithDNSNames(domain), func(leaf *x509.Certificate) {
-					leaf.NotAfter = time.Now().Add(tc.validFor)
-				})
-				key, err := x509.MarshalPKCS8PrivateKey(cert.PrivateKey)
-				require.NoError(t, err)
+	requestStarted := make(chan struct{})
+	requestStopped := make(chan struct{})
+	releaseHandler := make(chan struct{})
 
-				cache := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key})
-				cache = append(cache, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]})...)
-				require.NoError(t, os.WriteFile(filepath.Join(dir, domain), cache, 0600))
+	t.Cleanup(func() { close(releaseHandler) })
 
-				var started, finished int
+	fallback := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(requestStarted)
 
-				client := &acme.Client{
-					DirectoryURL: "https://acme.example.com/directory",
-					HTTPClient: &http.Client{Transport: acmeTransportFunc(func(req *http.Request) (*http.Response, error) {
-						started++
+		select {
+		case <-r.Context().Done():
+			close(requestStopped)
+		case <-releaseHandler:
+		}
+	})
+	require.NoError(t, le.StartHTTPServer(addr, fallback))
 
-						<-req.Context().Done()
+	requestCtx, cancelRequest := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancelRequest()
 
-						finished++
+	var dialer net.Dialer
 
-						return nil, req.Context().Err()
-					})},
-				}
-				le := newProvider(t, tlsletsencrypt.WithCacheDir(dir), tlsletsencrypt.WithClient(client))
-				cfg, err := le.TLSConfig()
-				require.NoError(t, err)
+	conn, err := dialer.DialContext(requestCtx, "tcp", addr)
+	require.NoError(t, err)
 
-				hello := &tls.ClientHelloInfo{ServerName: domain, CipherSuites: []uint16{tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256}}
-				cached, err := cfg.GetCertificate(hello)
-				require.NoError(t, err)
-				require.Equal(t, cert.Certificate, cached.Certificate)
-				synctest.Wait()
+	defer func() { _ = conn.Close() }()
 
-				wantRequests := 0
-				if tc.renewing {
-					wantRequests = 1
-				}
+	_, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: " + addr + "\r\n\r\n"))
+	require.NoError(t, err)
 
-				require.Equal(t, wantRequests, started)
-				require.Zero(t, finished)
-
-				require.NoError(t, le.Close(t.Context()))
-				require.Equal(t, wantRequests, finished, "Close must wait for in-flight renewal to exit")
-				time.Sleep(72 * time.Hour)
-				synctest.Wait()
-				require.Equal(t, wantRequests, started, "renewal must stay stopped after Close")
-
-				_, err = cfg.GetCertificate(hello)
-				require.ErrorIs(t, err, tlsletsencrypt.ErrClosed)
-				require.ErrorIs(t, le.StartHTTPServer("127.0.0.1:0", nil), tlsletsencrypt.ErrClosed)
-				require.NoError(t, le.Close(t.Context()))
-			})
-		})
+	select {
+	case <-requestStarted:
+	case <-requestCtx.Done():
+		t.Fatal("fallback did not receive the request")
 	}
+
+	closeCtx, cancelClose := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancelClose()
+
+	require.ErrorIs(t, le.Close(closeCtx), context.DeadlineExceeded)
+
+	select {
+	case <-requestStopped:
+	case <-requestCtx.Done():
+		t.Fatal("Close did not cancel the active request")
+	}
+
+	listener, err = net.Listen("tcp", addr)
+	require.NoError(t, err)
+	require.NoError(t, listener.Close())
+	require.NoError(t, le.Close(requestCtx))
+}
+
+func TestClose_RejectsNewServerStartsAndCertificateRequests(t *testing.T) {
+	t.Parallel()
+
+	le := newProvider(t)
+	cfg, err := le.TLSConfig()
+	require.NoError(t, err)
+	require.NoError(t, le.Close(t.Context()))
+
+	hello := &tls.ClientHelloInfo{ServerName: "example.com"}
+	_, err = le.GetCertificate(hello)
+	require.ErrorIs(t, err, tlsletsencrypt.ErrClosed)
+
+	_, err = cfg.GetCertificate(hello)
+	require.ErrorIs(t, err, tlsletsencrypt.ErrClosed)
+	require.ErrorIs(t, le.StartHTTPServer("127.0.0.1:0", nil), tlsletsencrypt.ErrClosed)
 }
