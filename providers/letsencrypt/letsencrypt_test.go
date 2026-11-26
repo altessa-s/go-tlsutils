@@ -6,7 +6,6 @@ package tlsletsencrypt
 
 import (
 	"log/slog"
-	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,7 +43,7 @@ func TestStartHTTPServerWithContext_NilContext(t *testing.T) {
 func TestStartHTTPServerWithContext_AlreadyStarted(t *testing.T) {
 	le := &LetsEncrypt{opts: &options{logger: slog.New(slog.DiscardHandler)}}
 	le.mu.Lock()
-	le.httpSrv = &http.Server{}
+	le.httpSrv = &challengeServer{}
 	le.mu.Unlock()
 
 	require.Error(t, le.StartHTTPServerWithContext(t.Context(), ":80", nil))

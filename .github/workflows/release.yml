@@ -2,15 +2,83 @@ name: Release
 
 on:
   push:
+    # GitHub omits tag events for pushes containing more than three tags.
+    branches: [main]
     tags:
       - "v*"
+      - "**/v*"
 
 permissions:
   contents: read
 
 jobs:
+  manifests:
+    name: Check the nested module releases
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-latest
+    outputs:
+      tags: ${{ steps.validate.outputs.tags }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - id: validate
+        shell: bash
+        run: |
+          modules=$(make --no-print-directory -s print-nested-check-modules)
+          unreleased="integration integration/docker"
+          for manifest in $(git ls-files '*/go.mod' ':!devtools/**' ':!**/testdata/**'); do
+            dir=${manifest%/go.mod}
+            if ! grep -Fxq "$dir" <<< "$modules" && ! printf '%s\n' $unreleased | grep -Fxq "$dir"; then
+              echo "$dir is missing from the module inventory" >&2
+              exit 1
+            fi
+          done
+
+          if [[ $GITHUB_REF_TYPE == branch ]]; then
+            tags=$(git tag --points-at HEAD --list '*/v*')
+          else
+            tags=$GITHUB_REF_NAME
+            if [[ $GITHUB_REF_NAME != */* ]]; then
+              # A coordinated make release already has its nested tags on this commit.
+              nested=$(git tag --points-at HEAD --list '*/v*')
+              tags="$tags ${nested}"
+            fi
+          fi
+          for tag in $tags; do
+            [[ $tag == */* ]] || continue
+            dir=${tag%/*}
+            grep -Fxq "$dir" <<< "$modules" || { echo "Unknown nested tag $tag" >&2; exit 1; }
+            bash .github/scripts/check-release-version.sh "${tag##*/}" "github.com/altessa-s/go-tlsutils/$dir"
+            requires=$(go mod edit -json "$dir/go.mod" | jq -r '.Require[]? | [.Path, .Version] | @tsv')
+            while read -r path version; do
+              case "$path" in
+                github.com/altessa-s/go-tlsutils)
+                  root_tag=$(git describe --first-parent --tags --abbrev=0 --match 'v[0-9]*' --exclude '*/*' HEAD)
+                  [[ $version == "$root_tag" ]] || { echo "$tag requires $path $version, want $root_tag" >&2; exit 1; } ;;
+                github.com/altessa-s/go-tlsutils/*)
+                  # make release tags the root and siblings together at one version.
+                  if [[ $(git tag --points-at HEAD --list "${tag##*/}") && $version != "${tag##*/}" ]]; then
+                    echo "$tag requires $path $version, want ${tag##*/}" >&2
+                    exit 1
+                  fi
+                  sibling=${path#github.com/altessa-s/go-tlsutils/}/$version
+                  git merge-base --is-ancestor "refs/tags/$sibling^{commit}" HEAD ||
+                    { echo "$tag requires unpublished sibling $sibling" >&2; exit 1; } ;;
+              esac
+            done <<< "$requires"
+          done
+          echo "tags=$(printf '%s\n' $tags | paste -sd ' ' -)" >> "$GITHUB_OUTPUT"
+
   checks:
     name: Release checks
+    needs: manifests
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '/')
     uses: ./.github/workflows/ci.yml
 
   release:
