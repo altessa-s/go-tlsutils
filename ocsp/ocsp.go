@@ -72,7 +72,7 @@ type Stapler struct {
 	mu             sync.RWMutex
 	cache          map[string]*ocspCacheEntry
 	fetches        *singleflight.Group[string, []byte] // shares a cache-miss fetch per certificate
-	httpClient     *http.Client
+	httpClient     HTTPDoer
 	retryPolicy    RetryPolicy
 	logger         *slog.Logger
 	cleanupCounter atomic.Uint64 // atomic counter for lazy cleanup

@@ -67,8 +67,7 @@ func (s *Stapler) fetchOCSPResponse(ctx context.Context, cert *tls.Certificate, 
 
 		s.logger.DebugContext(ctx, "trying OCSP server",
 			slog.Int("index", i+1),
-			slog.Int("total", len(leafCert.OCSPServer)),
-			slog.String("url", ocspURL))
+			slog.Int("total", len(leafCert.OCSPServer)))
 
 		var retryErr error
 
@@ -83,11 +82,10 @@ func (s *Stapler) fetchOCSPResponse(ctx context.Context, cert *tls.Certificate, 
 		if s.retryPolicy != nil {
 			// Use retry policy if available
 			retryErr = ExecuteWithRetry(ctx, s.retryPolicy, requestFunc,
-				WithOnRetry(func(attempt int, err error, nextDelay time.Duration) {
+				WithOnRetry(func(attempt int, _ error, nextDelay time.Duration) {
 					s.logger.ErrorContext(ctx, "ocsp request failed, retrying",
 						slog.Int("attempt", attempt+1),
-						slog.Duration("next_delay", nextDelay),
-						slog.Any("error", err))
+						slog.Duration("next_delay", nextDelay))
 				}))
 		} else {
 			// Single attempt without retry
@@ -101,8 +99,7 @@ func (s *Stapler) fetchOCSPResponse(ctx context.Context, cert *tls.Certificate, 
 
 		// Log failure and try next server
 		s.logger.ErrorContext(ctx, "failed to get OCSP response",
-			slog.String("url", ocspURL),
-			slog.Any("error", retryErr))
+			slog.Int("index", i+1))
 
 		if i == len(leafCert.OCSPServer)-1 {
 			// Last server failed
@@ -147,9 +144,9 @@ func (s *Stapler) fetchOCSPResponse(ctx context.Context, cert *tls.Certificate, 
 func (s *Stapler) requestOCSP(
 	ctx context.Context, ocspURL string, ocspReq []byte, leafCert, issuerCert *x509.Certificate,
 ) ([]byte, *ocsp.Response, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", ocspURL, bytes.NewReader(ocspReq))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ocspURL, bytes.NewReader(ocspReq))
 	if err != nil {
-		return nil, nil, coreerrs.WrapOperation(err, "create HTTP request")
+		return nil, nil, &httpRequestError{"create OCSP request", err}
 	}
 
 	httpReq.Header.Set("Content-Type", "application/ocsp-request")
@@ -161,7 +158,7 @@ func (s *Stapler) requestOCSP(
 
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, nil, coreerrs.WrapOperation(err, "execute OCSP request")
+		return nil, nil, &httpRequestError{"execute OCSP request", err}
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
@@ -189,7 +186,7 @@ func (s *Stapler) requestOCSP(
 
 	ocspResp, err := io.ReadAll(io.LimitReader(responseBody, maxOCSPResponseSize+1))
 	if err != nil {
-		return ocspResp, nil, coreerrs.WrapOperation(err, "read OCSP response")
+		return ocspResp, nil, &httpRequestError{"read OCSP response", err}
 	}
 
 	if len(ocspResp) > maxOCSPResponseSize {
@@ -205,6 +202,16 @@ func (s *Stapler) requestOCSP(
 
 	return ocspResp, parsedResp, nil
 }
+
+// httpRequestError preserves the cause for retry policy without formatting
+// untrusted URLs or diagnostics from an injected HTTP client.
+type httpRequestError struct {
+	operation string
+	cause     error
+}
+
+func (e *httpRequestError) Error() string { return e.operation + " failed" }
+func (e *httpRequestError) Unwrap() error { return e.cause }
 
 // checkFreshness rejects a response whose validity window does not contain
 // now, tolerating ocspClockSkew on both ends. A response without a nextUpdate

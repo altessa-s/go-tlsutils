@@ -4,8 +4,12 @@
 import "github.com/altessa-s/go-tlsutils/providers/letsencrypt"
 ```
 
-Package `tlsletsencrypt` provides a Let's Encrypt TLS certificate provider using HTTP-01 ACME challenges. Wraps `autocert` for automatic certificate
-management with renewal and caching.
+Package `tlsletsencrypt` provides a Let's Encrypt TLS certificate provider using HTTP-01 and TLS-ALPN-01 ACME challenges.
+It manages certificate issuance, renewal, and caching.
+
+`Close(ctx)` shuts down the provider's HTTP challenge server and waits for its goroutines until the context is done. If graceful shutdown fails, it force-closes active connections. The provider rejects new server starts and certificate requests after closing.
+
+The upstream `autocert` API has no way to stop its internal renewal timer once started. The timer continues running until process exit.
 
 ## HTTP-01 challenge server
 
