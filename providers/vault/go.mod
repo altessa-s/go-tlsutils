@@ -9,7 +9,7 @@ toolchain go1.27.4
 replace github.com/altessa-s/go-tlsutils => ../..
 
 require (
-	github.com/altessa-s/go-atlas-core v0.3.5
+	github.com/altessa-s/go-atlas-core v0.4.0
 	github.com/altessa-s/go-atlas-net v0.3.6
 	github.com/altessa-s/go-tlsutils v0.2.3
 	github.com/hashicorp/vault/api v1.23.0
