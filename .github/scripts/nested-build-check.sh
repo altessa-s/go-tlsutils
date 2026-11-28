@@ -1,8 +1,11 @@
 #!/bin/bash
 # Vet the working-tree nested modules of go-tlsutils and build their released tags.
 # The staged pass uses the root and sibling module zips, with their module
-# boundaries intact. The declared pass checks the published dependency graph
-# of a module with a direct root requirement. An MVS upgrade fails the check:
+# boundaries intact. Only released nested tags get the declared pass, which
+# checks the published dependency graph when there is a direct root requirement.
+# Working-tree modules get only the staged pass because their requirements
+# still point to the last released root while development can use new root APIs.
+# An MVS upgrade fails the declared check:
 # the graph cannot demonstrate that the nested module's own code builds with
 # the declared root. Direct sibling versions are checked for publication,
 # and MVS selects the versions used in the build. Publication is inferred
@@ -157,7 +160,7 @@ seed_declared() {
 }
 
 check_declared() (
-    local dir=$1 label=$2 check=$3 original=$4 action=$5
+    local dir=$1 label=$2 check=$3 original=$4
     local manifest="$work/declared.mod" entries kind path required root_version=""
     local before after selected graph parent repository=$PWD vcs
     local requirements=() loaded=" "
@@ -261,7 +264,7 @@ check_declared() (
 
     # Go can fill in checksums in the copy. A change to its requirements
     # means the original manifest did not describe the build that ran.
-    go "$action" -modfile="$manifest" ./... || return 1
+    go build -modfile="$manifest" ./... || return 1
     after=$(manifest_requirements "$manifest") || return 1
     if [[ $before != "$after" ]]; then
         echo "    $dir ($label): build requires changes to the declared go.mod requirements" >&2
@@ -378,8 +381,6 @@ for dir in "${nested[@]}"; do
     pin_staged "$check/go.mod" "$module/$dir"
     echo "==> $dir (working tree) against the root at $version"
     (cd "$check" && go vet ./...) || failed="$failed $dir"
-    check_declared "$dir" "working tree" "$check" "$dir/go.mod" vet ||
-        failed="$failed $dir (declared requirements)"
 
     tags=$(selected_tags "$dir")
     if [[ -z $tags ]]; then
@@ -400,7 +401,7 @@ for dir in "${nested[@]}"; do
         echo "==> $dir ($tag) against the root at $version"
         tag_failed=""
         (cd "$released/$dir" && go build ./...) || tag_failed=" $tag"
-        check_declared "$dir" "$tag" "$released/$dir" "$work/original.mod" build ||
+        check_declared "$dir" "$tag" "$released/$dir" "$work/original.mod" ||
             tag_failed="$tag_failed $tag (declared requirements)"
         if [[ -n $tag_failed ]]; then
             if accepted "$tag"; then
