@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -40,22 +41,22 @@ func TestPebbleACME(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
+	ready := &pebbleReadiness{}
 	ctr, err := testcontainers.Run(ctx, pebbleImage,
 		testcontainers.WithExposedPorts("14000/tcp", "15000/tcp"),
 		testcontainers.WithEnv(map[string]string{
 			"PEBBLE_VA_ALWAYS_VALID": "1",
 			"PEBBLE_WFE_NONCEREJECT": "0",
 		}),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("ACME directory available at"),
-			wait.ForListeningPort("14000/tcp"),
-			wait.ForListeningPort("15000/tcp"),
-		),
+		testcontainers.WithWaitStrategyAndDeadline(2*time.Minute, ready),
 	)
 	testcontainers.CleanupContainer(t, ctr)
 	require.NoError(t, err)
 
-	httpClient := pebbleHTTPClient(t, ctx, ctr)
+	httpClient := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: ready.tlsConfig},
+	}
 
 	acmeEndpoint, err := ctr.PortEndpoint(ctx, "14000/tcp", "https")
 	require.NoError(t, err)
@@ -90,33 +91,40 @@ func TestPebbleACME(t *testing.T) {
 	require.GreaterOrEqual(t, len(state.PeerCertificates), 2, "intermediate missing from the served chain")
 }
 
-// pebbleHTTPClient returns an HTTP client that trusts Pebble's minica, read
-// from the container, and verifies the "pebble" SAN whatever host the mapped
-// port is reached on.
-func pebbleHTTPClient(tb testing.TB, ctx context.Context, ctr testcontainers.Container) *http.Client {
-	tb.Helper()
+// pebbleReadiness loads the CA from the image and verifies both HTTPS APIs
+// before the test uses them. The ACME client reuses the same TLS configuration.
+type pebbleReadiness struct {
+	tlsConfig *tls.Config
+}
 
-	rc, err := ctr.CopyFileFromContainer(ctx, pebbleMinica)
-	require.NoError(tb, err)
+func (p *pebbleReadiness) WaitUntilReady(ctx context.Context, target wait.StrategyTarget) error {
+	rc, err := target.CopyFileFromContainer(ctx, pebbleMinica)
+	if err != nil {
+		return fmt.Errorf("copy Pebble CA: %w", err)
+	}
 
 	defer func() { _ = rc.Close() }()
 
 	minica, err := io.ReadAll(rc)
-	require.NoError(tb, err)
+	if err != nil {
+		return fmt.Errorf("read Pebble CA: %w", err)
+	}
 
 	pool := x509.NewCertPool()
-	require.True(tb, pool.AppendCertsFromPEM(minica), "no certificate in %s", pebbleMinica)
-
-	return &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				MinVersion: tls.VersionTLS12,
-				RootCAs:    pool,
-				ServerName: "pebble",
-			},
-		},
+	if !pool.AppendCertsFromPEM(minica) {
+		return fmt.Errorf("no certificate in %s", pebbleMinica)
 	}
+
+	p.tlsConfig = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		RootCAs:    pool,
+		ServerName: "pebble",
+	}
+
+	return wait.ForAll(
+		wait.ForHTTP("/dir").WithPort("14000/tcp").WithTLS(true, p.tlsConfig.Clone()),
+		wait.ForHTTP("/roots/0").WithPort("15000/tcp").WithTLS(true, p.tlsConfig.Clone()),
+	).WaitUntilReady(ctx, target)
 }
 
 // pebbleRoot fetches the root CA Pebble generated at startup from its

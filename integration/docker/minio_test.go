@@ -18,16 +18,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 
 	tlss3 "github.com/altessa-s/go-tlsutils/providers/s3"
 	tcminio "github.com/testcontainers/testcontainers-go/modules/minio"
 )
 
 const (
-	// minioImage is Chainguard's MinIO build: the upstream minio/minio and
-	// quay.io/minio/minio images are no longer publicly pullable, and the
-	// Chainguard free tier publishes only the latest tag.
-	minioImage  = "cgr.dev/chainguard/minio:latest"
+	// Pin the public Chainguard build's multi-platform digest because versioned tags require access.
+	minioImage  = "cgr.dev/chainguard/minio@sha256:37919418497f2f8ac6ef5c18760fcd01d1c8f2d17d36723fae0cb2fae67d8093"
 	minioBucket = "certificates"
 	certObject  = "tls/server.crt"
 	keyObject   = "tls/server.key"
@@ -42,7 +41,13 @@ func TestMinIOProvider(t *testing.T) {
 	ctx := t.Context()
 
 	// The image runs as a non-root user that cannot create /data.
-	ctr, err := tcminio.Run(ctx, minioImage, testcontainers.WithCmd("server", "/tmp"))
+	ctr, err := tcminio.Run(ctx, minioImage,
+		testcontainers.WithCmd("server", "/tmp"),
+		// The cluster write probe waits for storage, bucket metadata, and IAM initialization.
+		testcontainers.WithWaitStrategyAndDeadline(2*time.Minute,
+			wait.ForHTTP("/minio/health/cluster").WithPort("9000/tcp").WithStartupTimeout(2*time.Minute),
+		),
+	)
 	testcontainers.CleanupContainer(t, ctr)
 	require.NoError(t, err)
 
