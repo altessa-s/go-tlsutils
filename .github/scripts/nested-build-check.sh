@@ -6,7 +6,8 @@
 # the graph cannot demonstrate that the nested module's own code builds with
 # the declared root. Direct sibling versions are checked for publication,
 # and MVS selects the versions used in the build. Publication is inferred
-# from local tags and commits. GOPROXY=off skips the declared pass.
+# from local tags and commits, which also supply the declared artifacts.
+# GOPROXY=off skips the declared pass.
 #
 # Go ignores replacements in dependencies' manifests. Both passes discard
 # remote replacements, including third-party forks, to match that behavior.
@@ -33,6 +34,14 @@ if [[ ${#nested[@]} -eq 0 ]]; then
     echo "no nested modules"
     exit 0
 fi
+
+vcs_root=$module
+# GitHub resolves a semantic import version to the unsuffixed repository.
+if [[ $module =~ ^(.*)/v([2-9]|[1-9][0-9]+)$ ]]; then
+    vcs_root=${BASH_REMATCH[1]}
+fi
+# Go escapes uppercase letters in module cache paths.
+cache_module=$(printf '%s\n' "$module" | LC_ALL=C sed 's/[A-Z]/!&/g' | LC_ALL=C tr '[:upper:]' '[:lower:]')
 
 work=$(mktemp -d)
 trap 'chmod -R u+w "$work" 2>/dev/null || true; rm -rf "$work"' EXIT
@@ -111,31 +120,62 @@ published_cache=$(go env GOMODCACHE)
 published_private=$(go env GOPRIVATE)
 published_noproxy=$(go env GONOPROXY)
 published_nosumdb=$(go env GONOSUMDB)
+published_vcs=$(go env GOVCS)
+declared_source="$work/declared-source"
+declared_proxy="file://$declared_source/cache/download"
+declared_cache="$work/declared-cache"
 
 has_published_ref() {
-    local path=${1%@*} required=${1##*@} prefix=""
+    local path=${1%@*} required=${1##*@} repository=$2 prefix=""
     if [[ $required =~ ^v[0-9]+\.(0\.0-|[0-9]+\.[0-9]+-([^+]*\.)?0\.)[0-9]{14}-([0-9a-f]{12})(\+incompatible)?$ ]]; then
-        git rev-parse --verify --quiet "${BASH_REMATCH[3]}^{commit}" >/dev/null
+        git -C "$repository" rev-parse --verify --quiet "${BASH_REMATCH[3]}^{commit}" >/dev/null
         return
     fi
     [[ $path == "$module" ]] || prefix="${path#"$module/"}/"
-    git rev-parse --verify --quiet "refs/tags/$prefix${required%+incompatible}^{commit}" >/dev/null
+    git -C "$repository" rev-parse --verify --quiet "refs/tags/$prefix${required%+incompatible}^{commit}" >/dev/null
 }
 
 manifest_requirements() {
     manifest_entries "$1" | awk '$1 == "require" { print $2, $3 }' | LC_ALL=C sort
 }
 
+seed_declared() {
+    local required=$1 manifest=$2 repository=$3
+    # Use Go's release zip rules, including LICENSE inheritance for nested
+    # modules, so existing go.sum entries match the artifacts from Git.
+    # The only download here is an explicit own version from the checkout.
+    (cd "$work" &&
+        env -u GIT_CONFIG_PARAMETERS GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="url.$repository.insteadOf" \
+            GIT_CONFIG_VALUE_0="https://$vcs_root" GIT_ALLOW_PROTOCOL=file \
+            GOVCS="$vcs_root:git" GOPROXY=direct GOSUMDB=off GOMODCACHE="$declared_source" \
+            go mod download "$required") || return 1
+    # Verify existing sums against the local artifacts. Go can omit sums for
+    # transitive versions from the temporary modfile's companion sum file.
+    GOPROXY="$declared_proxy" GONOPROXY=none GOSUMDB=off \
+        go mod download -modfile="$manifest" "$required"
+}
+
 check_declared() (
     local dir=$1 label=$2 check=$3 original=$4 action=$5
     local manifest="$work/declared.mod" entries kind path required root_version=""
-    local before after selected graph parent
-    local requirements=()
+    local before after selected graph parent repository=$PWD vcs
+    local requirements=() loaded=" "
 
     [[ $published_proxy != off ]] || return 0
-    export GOPROXY="$published_proxy" GOMODCACHE="$published_cache" GOWORK=off
-    export GOPRIVATE="$published_private" GONOPROXY="$published_noproxy" GONOSUMDB="$published_nosumdb"
-    export GOFLAGS=-mod=mod
+    export GOPROXY="file://$published_cache/cache/download,$published_proxy"
+    export GOMODCACHE="$declared_cache" GOWORK=off
+    export GOPRIVATE="$published_private"
+    export GONOSUMDB="$module${published_nosumdb:+,$published_nosumdb}"
+    # Preload own versions before resolving the graph. On a cache miss,
+    # block both upstream proxies and VCS for own paths only.
+    vcs=$(awk -v RS=, -v vcs_root="$vcs_root" '$1 !~ /^[[:space:]]*$/ {
+        split($0, rule, ":")
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", rule[1])
+        if (rule[1] != vcs_root) printf ",%s", $0
+    }' <<<"$published_vcs")
+    export GONOPROXY="$module${published_noproxy:+,$published_noproxy}" GOVCS="$vcs_root:off$vcs"
+    export GOFLAGS='-mod=mod -modcacherw'
     cp "$original" "$manifest" || return 1
     rm -f "$work/declared.sum" || return 1
     if [[ -f ${original%.mod}.sum ]]; then
@@ -158,21 +198,43 @@ check_declared() (
 
     echo "==> $dir ($label, declared requirements) against the root at $root_version"
     for required in "${requirements[@]}"; do
-        if ! has_published_ref "$required"; then
+        if ! has_published_ref "$required" "$repository"; then
             echo "    $required is not published, skipped"
             return 0
         fi
     done
-    for required in "${requirements[@]}"; do
-        (cd "$work" && go mod download "$required") || return 1
-    done
-
     drop_replacements "$manifest" || return 1
     before=$(manifest_requirements "$manifest") || return 1
     cd "$check" || return 1
-    # The main module's edges in go mod graph contain the versions selected
-    # by MVS. This needs manifests, without fetching every module's metadata.
-    graph=$(go mod graph -modfile="$manifest") || return 1
+    # Keep the external cache warm across checks. Re-seed own versions
+    # against each check's go.sum before Go can read them from the cache.
+    rm -rf "$declared_cache/cache/download/$cache_module" \
+        "$declared_cache/$cache_module" "$declared_cache/$cache_module"@* || return 1
+    for required in "${requirements[@]}"; do
+        seed_declared "$required" "$manifest" "$repository" || return 1
+        loaded+="$required "
+    done
+    # An external dependency can introduce an own version absent from the
+    # main manifest. Resolve those misses locally too, then retry the graph.
+    until graph=$(go mod graph -modfile="$manifest" 2>"$work/declared-graph.err"); do
+        required=$(awk -v module="$module" '
+            /GOVCS disallows using/ {
+                ref = ($1 == "go:" ? $2 : $1)
+                sub(/:$/, "", ref)
+                split(ref, parts, "@")
+                if (parts[2] != "" && (parts[1] == module || index(parts[1], module "/") == 1)) {
+                    print ref
+                    exit
+                }
+            }' "$work/declared-graph.err")
+        if [[ -z $required || $loaded == *" $required "* ]] || ! has_published_ref "$required" "$repository"; then
+            cat "$work/declared-graph.err" >&2
+            return 1
+        fi
+        seed_declared "$required" "$manifest" "$repository" || return 1
+        loaded+="$required "
+    done
+    # The main module's edges contain the versions selected by MVS.
     selected=$(awk -v main="$module/$dir" -v target="$module@" '
         $1 == main && index($2, target) == 1 { print substr($2, length(target) + 1); exit }
     ' <<<"$graph")
@@ -181,6 +243,21 @@ check_declared() (
         echo "    $dir ($label): declared $root_version, graph selects $selected${parent:+ through $parent}" >&2
         return 1
     fi
+
+    # A pruned graph can include edges whose manifests it did not load.
+    # Their artifacts may still be needed when Go resolves package imports.
+    while read -r required; do
+        [[ -n $required && $loaded != *" $required "* ]] || continue
+        has_published_ref "$required" "$repository" || continue
+        seed_declared "$required" "$manifest" "$repository" || return 1
+    done < <(awk -v module="$module" -v self="$module/$dir" '
+        { for (i = 1; i <= 2; i++) {
+            split($i, ref, "@")
+            if (ref[2] && ref[1] != self &&
+                (ref[1] == module || index(ref[1], module "/") == 1) && !seen[$i]++)
+                print $i
+        } }
+    ' <<<"$graph")
 
     # Go can fill in checksums in the copy. A change to its requirements
     # means the original manifest did not describe the build that ran.
